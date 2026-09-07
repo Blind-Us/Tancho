@@ -19,6 +19,9 @@ parser.add_argument(
     help="Checkpoint filename regex under logs, or a direct path to a .pt file.",
 )
 parser.add_argument("--num_steps", type=int, default=500, help="Number of inference steps to simulate.")
+parser.add_argument("--leg_stiffness", type=float, default=None, help="Diagnostic override for leg actuator stiffness.")
+parser.add_argument("--leg_damping", type=float, default=None, help="Diagnostic override for leg actuator damping.")
+parser.add_argument("--leg_effort", type=float, default=None, help="Diagnostic override for leg actuator effort limit.")
 parser.add_argument(
     "--disable_resets",
     action="store_true",
@@ -338,6 +341,12 @@ def to_compatible_rsl_rl_cfg(agent_cfg):
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+    if args_cli.leg_stiffness is not None:
+        env_cfg.scene.robot.actuators["legs"].stiffness = args_cli.leg_stiffness
+    if args_cli.leg_damping is not None:
+        env_cfg.scene.robot.actuators["legs"].damping = args_cli.leg_damping
+    if args_cli.leg_effort is not None:
+        env_cfg.scene.robot.actuators["legs"].effort_limit_sim = args_cli.leg_effort
     env_cfg.seed = args_cli.seed if args_cli.seed is not None else agent_cfg.seed
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
     if isinstance(env_cfg, ManagerBasedRLEnvCfg):
@@ -354,8 +363,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
 
     env = gym.make(args_cli.task, cfg=env_cfg)
+    robot = env.unwrapped.scene["robot"]
     if isinstance(env.unwrapped, DirectMARLEnv):
         env = multi_agent_to_single_agent(env)
+
+
+    unwrapped = env.unwrapped
+    robot = unwrapped.scene["robot"]
+    contact_sensor = unwrapped.scene.sensors["contact_forces"]
+
+    thigh_l_id = robot.find_joints("joint_thigh_L")[0][0]
+    calf_l_id = robot.find_joints("joint_calf_L")[0][0]
+    thigh_r_id = robot.find_joints("joint_thigh_R")[0][0]
+    calf_r_id = robot.find_joints("joint_calf_R")[0][0]
+    wheel_l_id = contact_sensor.find_bodies("wheel_L")[0][0]
+    wheel_r_id = contact_sensor.find_bodies("wheel_R")[0][0]
+    leg_body_ids = contact_sensor.find_bodies(".*(thigh|calf).*")[0]
 
     legacy_agent_cfg = to_compatible_rsl_rl_cfg(agent_cfg)
     wrapped_env = LegacyRslRlVecEnvWrapper(env, clip_actions=getattr(agent_cfg, "clip_actions", None))
@@ -376,11 +399,64 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             actions = policy(obs)
             step_result = wrapped_env.step(actions)
             obs = step_result[0]
+
+            if steps % 20 == 0:
+                height = robot.data.root_pos_w[0, 2].item()
+
+                tl = robot.data.joint_pos[0, thigh_l_id].item()
+                cl = robot.data.joint_pos[0, calf_l_id].item()
+                tr = robot.data.joint_pos[0, thigh_r_id].item()
+                cr = robot.data.joint_pos[0, calf_r_id].item()
+
+                tl_target = robot.data.joint_pos_target[0, thigh_l_id].item()
+                cl_target = robot.data.joint_pos_target[0, calf_l_id].item()
+                tr_target = robot.data.joint_pos_target[0, thigh_r_id].item()
+                cr_target = robot.data.joint_pos_target[0, calf_r_id].item()
+
+                forces = contact_sensor.data.net_forces_w
+
+                wl_force = torch.linalg.vector_norm(
+                    forces[0, wheel_l_id]
+                ).item()
+
+                wr_force = torch.linalg.vector_norm(
+                    forces[0, wheel_r_id]
+                ).item()
+                leg_force = torch.linalg.vector_norm(forces[0, leg_body_ids], dim=-1).max().item()
+                applied = robot.data.applied_torque[0]
+
+                gravity = robot.data.projected_gravity_b[0]
+
+                tilt_deg = torch.rad2deg(
+                    torch.acos(
+                        torch.clamp(
+                            -gravity[2],
+                            min=-1.0,
+                            max=1.0,
+                        )
+                    )
+                ).item()
+
+                print(
+                    f"H={height:.4f} "
+                    f"TILT={tilt_deg:.1f}deg "
+                    f"TL={tl:.3f}/{tl_target:.3f} "
+                    f"CL={cl:.3f}/{cl_target:.3f} "
+                    f"TR={tr:.3f}/{tr_target:.3f} "
+                    f"CR={cr:.3f}/{cr_target:.3f} "
+                    f"WL={int(wl_force > 1.0)}({wl_force:.1f}) "
+                    f"WR={int(wr_force > 1.0)}({wr_force:.1f}) "
+                    f"LEG={int(leg_force > 5.0)}({leg_force:.1f}) "
+                    f"TAU=[{applied[thigh_l_id]:.1f},{applied[calf_l_id]:.1f},"
+                    f"{applied[thigh_r_id]:.1f},{applied[calf_r_id]:.1f}]"
+                )
+
             steps += 1
+
             if args_cli.num_steps > 0 and steps >= args_cli.num_steps:
                 break
 
-    wrapped_env.close()
+        wrapped_env.close()
 
 
 if __name__ == "__main__":

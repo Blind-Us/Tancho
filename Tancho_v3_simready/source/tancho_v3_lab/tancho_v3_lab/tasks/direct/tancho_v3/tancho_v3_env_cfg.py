@@ -33,16 +33,22 @@ ASSET_DIR = Path(__file__).resolve().parents[3] / "assets" / "robots" / "Tancho_
 URDF_PATH = str(ASSET_DIR / "urdf" / "Tancho_v3.urdf")
 
 # -- 站姿參數 ---------------------------------------------------------------
-STAND_THIGH = -0.60
-STAND_CALF = 1.10
+STAND_THIGH = -0.50
+STAND_CALF = 0.80
 RESPAWN_ROOT_HEIGHT = 0.26
-BASE_HEIGHT_TARGET = 0.23
+BASE_HEIGHT_TARGET = 0.22
 IMU_POS_ROOT = (-0.00835741999, 0.0000000160456, -0.0294337942)
 IMU_ROT_ROOT = (0.707106781, 0.707106781, 0.0, 0.0)
 PPO_STEPS_PER_ITERATION = 24
 CURRICULUM_ON_ITERATION = 1500
 CURRICULUM_VEL_ON_STEPS = CURRICULUM_ON_ITERATION * PPO_STEPS_PER_ITERATION
 CURRICULUM_PUSH_ON_STEPS = CURRICULUM_ON_ITERATION * PPO_STEPS_PER_ITERATION
+# 先禁止策略把腿當第三支點，再逐步提高最低高度。高度門檻若過早啟用，
+# PPO 會在尚未學會輪上平衡前被大量截斷，反而沒有足夠軌跡學到 18 cm 站姿。
+POSTURE_CURRICULUM_ON_STEPS = 400 * PPO_STEPS_PER_ITERATION
+POSTURE_CURRICULUM_RAMP_STEPS = 1000 * PPO_STEPS_PER_ITERATION
+LEG_CONTACT_TERMINATION_ON_STEPS = 250 * PPO_STEPS_PER_ITERATION
+LEG_CONTACT_TERMINATION_RAMP_STEPS = 750 * PPO_STEPS_PER_ITERATION
 
 
 @configclass
@@ -82,7 +88,7 @@ class TanchoV3SceneCfg(InteractiveSceneCfg):
                 joint_names_expr=["joint_thigh_L", "joint_calf_L",
                                   "joint_thigh_R", "joint_calf_R"],
                 stiffness=25.0,
-                damping=0.75,
+                damping=2.0,
                 effort_limit_sim=40.0,
                 velocity_limit_sim=1.0,
             ),
@@ -91,7 +97,7 @@ class TanchoV3SceneCfg(InteractiveSceneCfg):
                 joint_names_expr=["joint_wheel_L", "joint_wheel_R"],
                 stiffness=0.0,
                 damping=0.3,
-                effort_limit_sim=0.45,
+                effort_limit_sim=2.0,
                 velocity_limit_sim=20.0,
             ),
         },
@@ -117,7 +123,9 @@ class ActionsCfg:
     joint_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"],
-        scale=0.25,
+        # 0.25 rad 無法在下沉前建立足夠的預載扭矩；放寬控制範圍，
+        # 讓策略可主動伸腿支撐，而非只能等誤差變大後被動追趕。
+        scale=0.8,
         use_default_offset=True,
     )
     # 實測 velocity target 在倒地前幾乎無法改變輪心位置；直接力矩可恢復控制權。
@@ -125,7 +133,7 @@ class ActionsCfg:
     joint_vel = mdp.JointEffortActionCfg(
         asset_name="robot",
         joint_names=["joint_wheel_L", "joint_wheel_R"],
-        scale=0.45,
+        scale=2.0,
     )
 
 
@@ -183,10 +191,35 @@ class TerminationsCfg:
             "threshold": 10.0,
         },
     )
-    # pi 上限使姿態條件保持 no-op，不因傾斜提前終止。
+    minimum_base_height = TerminationTermCfg(
+        func=cr.base_below_minimum_height,
+        params={
+            "minimum_height": 0.14,
+            "initial_height": 0.06,
+            "minimum_below_steps": 20,
+            "initial_below_steps": 100,
+            "enable_after_steps": POSTURE_CURRICULUM_ON_STEPS,
+            "ramp_steps": POSTURE_CURRICULUM_RAMP_STEPS,
+        },
+    )
+    sustained_leg_contact = TerminationTermCfg(
+        func=cr.sustained_illegal_contact,
+        params={
+            "sensor_cfg": SceneEntityCfg(
+                "contact_forces",
+                body_names=[".*thigh.*", ".*calf.*"],
+            ),
+            "threshold": 5.0,
+            "minimum_contact_steps": 10,
+            "initial_contact_steps": 50,
+            "enable_after_steps": LEG_CONTACT_TERMINATION_ON_STEPS,
+            "ramp_steps": LEG_CONTACT_TERMINATION_RAMP_STEPS,
+        },
+    )
+    # 超過約 46 度視為已失去可恢復站姿，避免接近躺平仍累積存活時間。
     bad_orientation = TerminationTermCfg(
         func=mdp.bad_orientation,
-        params={"limit_angle": math.pi},
+        params={"limit_angle": 0.8},
     )
 
 
@@ -268,4 +301,14 @@ class CurriculumCfg:
             },
         },
     )
-
+    # strengthen_minimum_height = CurriculumTermCfg(
+    #     func=mdp.modify_env_param,
+    #     params={
+    #         "address": "reward_manager.cfg.minimum_base_height.weight",
+    #         "modify_fn": cr.curriculum_set_after_steps,
+    #         "modify_params": {
+    #             "num_steps": POSTURE_CURRICULUM_ON_STEPS,
+    #             "target": -6.0,
+    #         },
+    #     },
+    # )

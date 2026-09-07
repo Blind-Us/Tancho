@@ -1,32 +1,12 @@
-"""Tancho v3 自訂 reward / curriculum 函式。
-
-注意：關節名稱以 URDF 為準 (joint_thigh_L / joint_calf_L / ...)，
-不是 L_thigh_joint 這種舊命名。
-"""
 import torch
+import math
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg
 
 
-def nominal_state_thigh(env: ManagerBasedRLEnv, asset_cfg_name: str = "robot") -> torch.Tensor:
-    """懲罰左右腿 Thigh 關節的對稱偏差 |L_thigh - R_thigh|。"""
-    robot: Articulation = env.scene[asset_cfg_name]
-    l_idx, _ = robot.find_joints("joint_thigh_L")
-    r_idx, _ = robot.find_joints("joint_thigh_R")
-    diff = robot.data.joint_pos[:, l_idx[0]] - robot.data.joint_pos[:, r_idx[0]]
-    return torch.abs(diff)
 
-
-def nominal_state_calf(env: ManagerBasedRLEnv, asset_cfg_name: str = "robot") -> torch.Tensor:
-    """懲罰左右腿 Calf 關節的對稱偏差 |L_calf - R_calf|。"""
-    robot: Articulation = env.scene[asset_cfg_name]
-    l_idx, _ = robot.find_joints("joint_calf_L")
-    r_idx, _ = robot.find_joints("joint_calf_R")
-    diff = robot.data.joint_pos[:, l_idx[0]] - robot.data.joint_pos[:, r_idx[0]]
-    return torch.abs(diff)
-
-
+# 雙輪接地  左右輪都有接觸地面時給分
 def wheel_ground_contact(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
@@ -45,18 +25,177 @@ def wheel_ground_contact(
     return torch.prod(contact, dim=1)
 
 
-def action_smoothness_2nd(env: ManagerBasedRLEnv) -> torch.Tensor:
-    """二階動作平滑度懲罰 (a_t - 2*a_{t-1} + a_{t-2})^2，針對腿部 4 關節。"""
-    actions = env.action_manager.action
-    prev_actions = env.action_manager.prev_action
-    if hasattr(env.action_manager, "prev_prev_action"):
-        prev_prev_actions = env.action_manager.prev_prev_action
-        acc = actions[:, :4] - 2 * prev_actions[:, :4] + prev_prev_actions[:, :4]
-    else:
-        acc = actions[:, :4] - prev_actions[:, :4]
-    return torch.sum(torch.square(acc), dim=1)
+def mirror_leg_actions_l1(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+) -> torch.Tensor:
+    """懲罰左右腿 action 不一致。
+        action order: thigh_L, thigh_R, calf_L, calf_R
+        thigh_L == thigh_R
+        calf_L == calf_R
+        penalty = 0
+
+    差異越大，回傳值越大。
+    FlatRewardsCfg 使用負 weight 將其轉成 penalty。
+    """
+    actions = env.action_manager.get_term(action_name).raw_actions
+    thigh_error = torch.abs(actions[:, 0] - actions[:, 1])
+    calf_error = torch.abs(actions[:, 2] - actions[:, 3])
+
+    # 取平均，避免 thigh + calf 直接相加造成數值過大
+    return 0.5 * (thigh_error + calf_error)
 
 
+#-----------------------------------------------------------------------------------
+
+# 穩定站立加分  高度接近目標、姿態穩時給較高分
+def stable_standing_bonus(
+    env: ManagerBasedRLEnv,
+    target_height: float,
+    height_scale: float,
+    max_tilt_deg: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    robot: Articulation = env.scene[asset_cfg.name]
+
+    # -------------------------
+    # Height L2 score
+    # -------------------------
+    height = robot.data.root_pos_w[:, 2]
+
+    height_error = (
+        height - target_height
+    ) / height_scale
+
+    height_score = torch.exp(
+        -torch.square(height_error)
+    )
+
+    # -------------------------
+    # Orientation L2 score
+    # -------------------------
+    gravity_xy = torch.linalg.vector_norm(
+        robot.data.projected_gravity_b[:, :2],
+        dim=1,
+    )
+
+    orientation_scale = math.sin(
+        math.radians(max_tilt_deg)
+    )
+
+    orientation_error = (
+        gravity_xy / orientation_scale
+    )
+
+    orientation_score = torch.exp(
+        -torch.square(orientation_error)
+    )
+
+    # -------------------------
+    # Standing score
+    # -------------------------
+    return height_score * orientation_score
+
+
+def base_height_l2_normalized(
+    env: ManagerBasedRLEnv,
+    target_height: float,
+    height_scale: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """以物理容許誤差正規化高度 L2，避免靠放大 reward weight 才看得到高度差。"""
+    robot: Articulation = env.scene[asset_cfg.name]
+    normalized_error = (robot.data.root_pos_w[:, 2] - target_height) / height_scale
+    return torch.square(normalized_error)
+
+
+def base_below_minimum_height(
+    env: ManagerBasedRLEnv,
+    minimum_height: float,
+    initial_height: float | None = None,
+    minimum_below_steps: int = 1,
+    initial_below_steps: int | None = None,
+    enable_after_steps: int = 0,
+    ramp_steps: int = 0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """持續低於漸進安全下限才終止，允許短暫下蹲後主動恢復。"""
+    robot: Articulation = env.scene[asset_cfg.name]
+    counter_name = "_tancho_below_minimum_height_steps"
+    below_steps = getattr(env, counter_name, None)
+    if below_steps is None or below_steps.shape[0] != env.num_envs:
+        below_steps = torch.zeros(env.num_envs, dtype=torch.long, device=robot.device)
+
+    if env.common_step_counter < enable_after_steps:
+        below_steps.zero_()
+        setattr(env, counter_name, below_steps)
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=robot.device)
+
+    threshold = minimum_height
+    allowed_below_steps = minimum_below_steps
+    if initial_height is not None and ramp_steps > 0:
+        progress = min(
+            (env.common_step_counter - enable_after_steps) / ramp_steps,
+            1.0,
+        )
+        threshold = initial_height + progress * (minimum_height - initial_height)
+        if initial_below_steps is not None:
+            allowed_below_steps = round(
+                initial_below_steps
+                + progress * (minimum_below_steps - initial_below_steps)
+            )
+
+    below = robot.data.root_pos_w[:, 2] < threshold
+    below_steps = torch.where(below, below_steps + 1, torch.zeros_like(below_steps))
+    setattr(env, counter_name, below_steps)
+    return below_steps >= allowed_below_steps
+
+
+def sustained_illegal_contact(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    threshold: float,
+    minimum_contact_steps: int,
+    initial_contact_steps: int | None = None,
+    enable_after_steps: int = 0,
+    ramp_steps: int = 0,
+) -> torch.Tensor:
+    """指定部位持續接地一段時間才終止，允許短暫擦碰但禁止用腿支撐。"""
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids]
+    max_force = torch.max(torch.linalg.vector_norm(forces, dim=-1), dim=1).values
+    in_contact = torch.any(max_force > threshold, dim=1)
+
+    counter_name = "_tancho_sustained_illegal_contact_steps"
+    contact_steps = getattr(env, counter_name, None)
+    if contact_steps is None or contact_steps.shape[0] != env.num_envs:
+        contact_steps = torch.zeros(env.num_envs, dtype=torch.long, device=forces.device)
+
+    if env.common_step_counter < enable_after_steps:
+        contact_steps.zero_()
+        setattr(env, counter_name, contact_steps)
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=forces.device)
+
+    allowed_contact_steps = minimum_contact_steps
+    if initial_contact_steps is not None and ramp_steps > 0:
+        progress = min(
+            (env.common_step_counter - enable_after_steps) / ramp_steps,
+            1.0,
+        )
+        allowed_contact_steps = round(
+            initial_contact_steps
+            + progress * (minimum_contact_steps - initial_contact_steps)
+        )
+
+    contact_steps = torch.where(in_contact, contact_steps + 1, torch.zeros_like(contact_steps))
+    setattr(env, counter_name, contact_steps)
+    return contact_steps >= allowed_contact_steps
+
+
+#-----------------------------------------------------------------------------------
+
+
+# 重心保持在輪軸附近  COM 離左右輪軸越遠，扣分越多
 def wheel_under_com_l2(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg,
@@ -115,10 +254,12 @@ def wheel_under_com_l2(
     return torch.sum(torch.square(perpendicular_error), dim=1) / (error_scale**2)
 
 
+
 # ---------------------------------------------------------------------------
 # Curriculum modify_fn (不能用 lambda，Isaac Lab config 需要可序列化)
 # ---------------------------------------------------------------------------
 
+# 開啟移動訓練  到指定訓練步數後，開始讓部分環境接受移動指令
 def curriculum_enable_velocity(env, env_ids, old_value, num_steps: int, target: float):
     """達到 num_steps 後，將 rel_standing_envs 從 1.0 降到 target。"""
     from isaaclab.envs.mdp.curriculums import modify_env_param
@@ -127,18 +268,19 @@ def curriculum_enable_velocity(env, env_ids, old_value, num_steps: int, target: 
     return modify_env_param.NO_CHANGE
 
 
+# 改變訓練參數  到指定步數後，把某個 Reward 或參數改成新值
+def curriculum_set_after_steps(env, env_ids, old_value, num_steps: int, target: float):
+    """達到指定步數後，將任意可修改參數切換為 target。"""
+    from isaaclab.envs.mdp.curriculums import modify_env_param
+    if env.common_step_counter >= num_steps:
+        return target
+    return modify_env_param.NO_CHANGE
+
+
+# 開啟外力干擾  到指定步數後，開始對機器人施加推力測試穩定性
 def curriculum_enable_push(env, env_ids, old_value, num_steps: int, velocity_range: dict):
     """達到 num_steps 後，開啟推力干擾速度範圍。"""
     from isaaclab.envs.mdp.curriculums import modify_env_param
     if env.common_step_counter >= num_steps:
         return velocity_range
     return modify_env_param.NO_CHANGE
-
-def target_forward_pitch_l2(
-    env: ManagerBasedRLEnv,
-    target_gravity_x: float = 0.087,
-    asset_cfg_name: str = "robot",
-) -> torch.Tensor:
-    robot: Articulation = env.scene[asset_cfg_name]
-    gravity_x = robot.data.projected_gravity_b[:, 0]
-    return torch.square(gravity_x - target_gravity_x)
