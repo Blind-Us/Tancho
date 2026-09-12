@@ -128,7 +128,7 @@
   <link name="calf_L">
     <inertial>
       <origin xyz="0.000188809828 -0.00516026443 -0.00324688923" rpy="0 0 0" />
-      <mass value="0.341" />
+      <mass value="0.150" />
       <inertia ixx="0.000273664582" iyy="0.000148954531" izz="0.000263786338" ixy="2.84340912e-06" ixz="1.52962103e-06" iyz="-4.18052867e-05" />
     </inertial>
     <visual>
@@ -159,7 +159,7 @@
   <link name="wheel_L">
     <inertial>
       <origin xyz="4.74095232e-11 5.83255949e-07 0.00192447727" rpy="0 0 0" />
-      <mass value="0.152" />
+      <mass value="0.035" />
       <inertia ixx="3.78602142e-05" iyy="3.7860214e-05" izz="5.35967391e-05" ixy="-2.30837502e-16" ixz="-8.13345963e-14" iyz="-5.49762767e-10" />
     </inertial>
     <visual>
@@ -245,7 +245,7 @@
   <link name="calf_R">
     <inertial>
       <origin xyz="0.000188809828 -0.00516026443 0.00324688923" rpy="0 0 0" />
-      <mass value="0.341" />
+      <mass value="0.150" />
       <inertia ixx="0.000273664582" iyy="0.000148954531" izz="0.000263786338" ixy="2.84340912e-06" ixz="-1.52962103e-06" iyz="4.18052867e-05" />
     </inertial>
     <visual>
@@ -276,7 +276,7 @@
   <link name="wheel_R">
     <inertial>
       <origin xyz="2.1907452e-11 5.83325029e-07 -0.00192447731" rpy="0 0 0" />
-      <mass value="0.152" />
+      <mass value="0.035" />
       <inertia ixx="3.78602143e-05" iyy="3.78602141e-05" izz="5.35967391e-05" ixy="1.66490752e-16" ixz="1.49207184e-14" iyz="5.49859042e-10" />
     </inertial>
     <visual>
@@ -337,42 +337,42 @@
     <parent link="base_link" />
     <child link="thigh_L" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.57" upper="1.57" effort="12.5" velocity="12.5663706" />
+    <limit lower="-1.57" upper="1.57" effort="12.5" velocity="20" />
   </joint>
   <joint name="joint_calf_L" type="revolute">
     <origin xyz="-1.53296043e-13 -0.15 -0.016" rpy="0 0 0" />
     <parent link="thigh_L" />
     <child link="calf_L" />
     <axis xyz="0 0 1" />
-    <limit lower="0" upper="3" effort="12.5" velocity="12.5663706" />
+    <limit lower="0" upper="3" effort="12.5" velocity="20" />
   </joint>
   <joint name="joint_wheel_L" type="continuous">
     <origin xyz="4.58907579e-13 -0.0999975373 -0.0455046153" rpy="3.14159265 0 0" />
     <parent link="calf_L" />
     <child link="wheel_L" />
     <axis xyz="0 0 1" />
-    <limit effort="0.45" velocity="52.3598776" />
+    <limit effort="0.45" velocity="188" />
   </joint>
   <joint name="joint_thigh_R" type="revolute">
     <origin xyz="0.0192385743 0.000552656168 0.0539953847" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="thigh_R" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.57" upper="1.57" effort="12.5" velocity="12.5663706" />
+    <limit lower="-1.57" upper="1.57" effort="12.5" velocity="20" />
   </joint>
   <joint name="joint_calf_R" type="revolute">
     <origin xyz="-1.62007296e-13 -0.15 0.016" rpy="0 0 0" />
     <parent link="thigh_R" />
     <child link="calf_R" />
     <axis xyz="0 0 1" />
-    <limit lower="0" upper="3" effort="12.5" velocity="12.5663706" />
+    <limit lower="0" upper="3" effort="12.5" velocity="20" />
   </joint>
   <joint name="joint_wheel_R" type="continuous">
     <origin xyz="-1.5894841e-14 -0.0999975373 0.0455046153" rpy="3.14159265 0 0" />
     <parent link="calf_R" />
     <child link="wheel_R" />
     <axis xyz="0 0 1" />
-    <limit effort="0.45" velocity="52.3598776" />
+    <limit effort="0.45" velocity="188" />
   </joint>
   <joint name="imu_joint" type="fixed">
     <origin xyz="-0.00835741999 -0.0294337942 -1.60456261e-08" rpy="0 0 0" />

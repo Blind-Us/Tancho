@@ -3,7 +3,7 @@ import math
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg
-
+import isaaclab.envs.mdp as mdp
 
 
 # 雙輪接地  左右輪都有接觸地面時給分
@@ -25,26 +25,29 @@ def wheel_ground_contact(
     return torch.prod(contact, dim=1)
 
 
-def mirror_leg_actions_l1(
+def mirror_leg_l2(
     env: ManagerBasedRLEnv,
-    action_name: str = "joint_pos",
 ) -> torch.Tensor:
-    """懲罰左右腿 action 不一致。
-        action order: thigh_L, thigh_R, calf_L, calf_R
-        thigh_L == thigh_R
-        calf_L == calf_R
-        penalty = 0
+    """懲罰左右腿實際 joint position 不一致。"""
 
-    差異越大，回傳值越大。
-    FlatRewardsCfg 使用負 weight 將其轉成 penalty。
-    """
-    actions = env.action_manager.get_term(action_name).raw_actions
-    thigh_error = torch.abs(actions[:, 0] - actions[:, 1])
-    calf_error = torch.abs(actions[:, 2] - actions[:, 3])
+    robot: Articulation = env.scene["robot"]
 
-    # 取平均，避免 thigh + calf 直接相加造成數值過大
-    return 0.5 * (thigh_error + calf_error)
+    joint_ids, _ = robot.find_joints(
+        [
+            "joint_thigh_L",
+            "joint_thigh_R",
+            "joint_calf_L",
+            "joint_calf_R",
+        ],
+        preserve_order=True,
+    )
 
+    joint_pos = robot.data.joint_pos[:, joint_ids]
+
+    return 0.5 * (
+        (joint_pos[:, 0] - joint_pos[:, 1]).square()
+        + (joint_pos[:, 2] - joint_pos[:, 3]).square()
+    )
 
 #-----------------------------------------------------------------------------------
 
@@ -112,43 +115,32 @@ def base_height_l2_normalized(
 def base_below_minimum_height(
     env: ManagerBasedRLEnv,
     minimum_height: float,
-    initial_height: float | None = None,
-    minimum_below_steps: int = 1,
-    initial_below_steps: int | None = None,
-    enable_after_steps: int = 0,
-    ramp_steps: int = 0,
+    minimum_below_steps: int = 15,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """持續低於漸進安全下限才終止，允許短暫下蹲後主動恢復。"""
     robot: Articulation = env.scene[asset_cfg.name]
+
     counter_name = "_tancho_below_minimum_height_steps"
     below_steps = getattr(env, counter_name, None)
+
     if below_steps is None or below_steps.shape[0] != env.num_envs:
-        below_steps = torch.zeros(env.num_envs, dtype=torch.long, device=robot.device)
-
-    if env.common_step_counter < enable_after_steps:
-        below_steps.zero_()
-        setattr(env, counter_name, below_steps)
-        return torch.zeros(env.num_envs, dtype=torch.bool, device=robot.device)
-
-    threshold = minimum_height
-    allowed_below_steps = minimum_below_steps
-    if initial_height is not None and ramp_steps > 0:
-        progress = min(
-            (env.common_step_counter - enable_after_steps) / ramp_steps,
-            1.0,
+        below_steps = torch.zeros(
+            env.num_envs,
+            dtype=torch.long,
+            device=robot.device,
         )
-        threshold = initial_height + progress * (minimum_height - initial_height)
-        if initial_below_steps is not None:
-            allowed_below_steps = round(
-                initial_below_steps
-                + progress * (minimum_below_steps - initial_below_steps)
-            )
 
-    below = robot.data.root_pos_w[:, 2] < threshold
-    below_steps = torch.where(below, below_steps + 1, torch.zeros_like(below_steps))
+    below = robot.data.root_pos_w[:, 2] < minimum_height
+
+    below_steps = torch.where(
+        below,
+        below_steps + 1,
+        torch.zeros_like(below_steps),
+    )
+
     setattr(env, counter_name, below_steps)
-    return below_steps >= allowed_below_steps
+
+    return below_steps >= minimum_below_steps
 
 
 def sustained_illegal_contact(
@@ -252,6 +244,37 @@ def wheel_under_com_l2(
 
     # 用可調的物理容許誤差正規化，避免 m^2 數值過小而被其他 reward 蓋過。
     return torch.sum(torch.square(perpendicular_error), dim=1) / (error_scale**2)
+
+
+
+
+def coupled_survival_score(
+    env: ManagerBasedRLEnv,
+    target_height: float,
+    height_scale: float,
+    asset_cfg_joint: SceneEntityCfg,
+    scale_height: float = 5.0,        # 沿用原 base_height 的 5.0
+    scale_orientation: float = 10.0,  # 沿用原 flat_orientation 的 10.0
+    scale_joint: float = 0.5,         # 沿用原 joint_deviation 的 0.5
+) -> torch.Tensor:
+    """
+    結合高度、傾斜與關節折疊的乘法門控生存獎勵。
+    直接調用原有函式的計算結果，並沿用原有的 weight 絕對值作為衰減超參數。
+    """
+    # 1. 取得原有函式的計算結果 (皆為正數的誤差/距離值)
+    res_height = base_height_l2_normalized(env, target_height=target_height, height_scale=height_scale)
+    res_tilt = mdp.flat_orientation_l2(env)
+    res_joint = mdp.joint_deviation_l1(env, asset_cfg=asset_cfg_joint)
+    
+    # 2. 轉換為 0.0 ~ 1.0 的健康度分數 (加上負號來產生指數衰減)
+    s_height = torch.exp(-scale_height * res_height)
+    s_tilt = torch.exp(-scale_orientation * res_tilt)
+    s_joint = torch.exp(-scale_joint * res_joint)
+    
+    # 3. 乘法門控連鎖
+    return s_height * s_tilt * s_joint
+
+
 
 
 

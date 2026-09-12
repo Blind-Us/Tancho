@@ -23,6 +23,7 @@ parser.add_argument("--leg_stiffness", type=float, default=None, help="Diagnosti
 parser.add_argument("--leg_damping", type=float, default=None, help="Diagnostic override for leg actuator damping.")
 parser.add_argument("--leg_effort", type=float, default=None, help="Diagnostic override for leg actuator effort limit.")
 parser.add_argument("--leg_velocity",type=float,default=None,help="Diagnostic override for leg actuator velocity limit.",)
+parser.add_argument("--respawn_height", type=float, default=None, help="Diagnostic override for initial root Z height.")
 parser.add_argument(
     "--disable_resets",
     action="store_true",
@@ -348,6 +349,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env_cfg.scene.robot.actuators["legs"].damping = args_cli.leg_damping
     if args_cli.leg_effort is not None:
         env_cfg.scene.robot.actuators["legs"].effort_limit_sim = args_cli.leg_effort
+    # IMPORTANT: the CLI argument existed before, but was not actually applied.
+    if args_cli.leg_velocity is not None:
+        env_cfg.scene.robot.actuators["legs"].velocity_limit_sim = args_cli.leg_velocity
+
+    if args_cli.respawn_height is not None:
+        _pos = env_cfg.scene.robot.init_state.pos
+        env_cfg.scene.robot.init_state.pos = (_pos[0], _pos[1], args_cli.respawn_height)
+
+    legs_cfg = env_cfg.scene.robot.actuators["legs"]
+    print(
+        f"[DIAG CFG] legs: stiffness={legs_cfg.stiffness}, "
+        f"damping={legs_cfg.damping}, effort_limit_sim={legs_cfg.effort_limit_sim}, "
+        f"velocity_limit_sim={legs_cfg.velocity_limit_sim}"
+    )
+
     env_cfg.seed = args_cli.seed if args_cli.seed is not None else agent_cfg.seed
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
     if isinstance(env_cfg, ManagerBasedRLEnvCfg):
@@ -379,6 +395,39 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     calf_l_id = robot.find_joints("joint_calf_L")[0][0]
     thigh_r_id = robot.find_joints("joint_thigh_R")[0][0]
     calf_r_id = robot.find_joints("joint_calf_R")[0][0]
+
+    # Body / joint IDs used for diagnostics.
+    wheel_l_id = robot.find_bodies("wheel_L")[0][0]
+    wheel_r_id = robot.find_bodies("wheel_R")[0][0]
+    wheel_l_joint_id = robot.find_joints("joint_wheel_L")[0][0]
+    wheel_r_joint_id = robot.find_joints("joint_wheel_R")[0][0]
+
+    print(f"[DIAG] robot.body_names = {robot.body_names}")
+    print(f"[DIAG] robot.joint_names = {robot.joint_names}")
+
+    # Contact sensor body ids. Missing/merged bodies are tolerated and reported as 0 N.
+    contact_sensor = unwrapped.scene.sensors.get("contact_forces", None)
+
+    def _contact_ids(name):
+        if contact_sensor is None:
+            return []
+        try:
+            ids, _ = contact_sensor.find_bodies(name)
+            return ids
+        except Exception:
+            return []
+
+    contact_ids = {
+        "wheelL": _contact_ids("wheel_L"),
+        "wheelR": _contact_ids("wheel_R"),
+        "thighL": _contact_ids("thigh_L"),
+        "thighR": _contact_ids("thigh_R"),
+        "calfL": _contact_ids("calf_L"),
+        "calfR": _contact_ids("calf_R"),
+        "baseRoot": _contact_ids("base_link_root"),
+        "base": _contact_ids("base_link"),
+    }
+    print(f"[DIAG] contact_ids = {contact_ids}")
 
     # ------------------------------------------------------------
     # Load RSL-RL policy
@@ -420,18 +469,76 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         )
 
     # ------------------------------------------------------------
-    # Play
+    # Play - ZERO ACTION diagnostic
     # ------------------------------------------------------------
+    # The goal of this block is not to judge the PPO policy.
+    # It keeps the action at zero and observes what physics does to the robot.
     steps = 0
 
-    # 
-    
-    steps = 0
+    def _contact_force_mag(ids):
+        if contact_sensor is None or len(ids) == 0:
+            return 0.0
+        try:
+            forces = contact_sensor.data.net_forces_w[0, ids, :]
+            return torch.linalg.vector_norm(forces, dim=-1).sum().item()
+        except Exception:
+            return 0.0
+
+    def _print_state(tag, done=False):
+        q = robot.data.joint_pos[0]
+        qt = robot.data.joint_pos_target[0]
+        qd = robot.data.joint_vel[0]
+        tau = robot.data.applied_torque[0]
+
+        root_z = robot.data.root_pos_w[0, 2].item()
+        root_vz = robot.data.root_lin_vel_w[0, 2].item()
+        wheel_l_z = robot.data.body_pos_w[0, wheel_l_id, 2].item()
+        wheel_r_z = robot.data.body_pos_w[0, wheel_r_id, 2].item()
+
+        wheel_l_qd = robot.data.joint_vel[0, wheel_l_joint_id].item()
+        wheel_r_qd = robot.data.joint_vel[0, wheel_r_joint_id].item()
+        wheel_l_tau = robot.data.applied_torque[0, wheel_l_joint_id].item()
+        wheel_r_tau = robot.data.applied_torque[0, wheel_r_joint_id].item()
+        gravity_x = robot.data.projected_gravity_b[0, 0].item()
+        pitch_rate = robot.data.root_ang_vel_b[0, 1].item()
+
+        fwL = _contact_force_mag(contact_ids["wheelL"])
+        fwR = _contact_force_mag(contact_ids["wheelR"])
+        fthigh = _contact_force_mag(contact_ids["thighL"]) + _contact_force_mag(contact_ids["thighR"])
+        fcalf = _contact_force_mag(contact_ids["calfL"]) + _contact_force_mag(contact_ids["calfR"])
+        fbase = _contact_force_mag(contact_ids["baseRoot"]) + _contact_force_mag(contact_ids["base"])
+
+        print(
+            f"{tag} done={int(done)} "
+            f"root_z={root_z:+.4f} root_vz={root_vz:+.4f} "
+            f"wheelL_z={wheel_l_z:+.4f} wheelR_z={wheel_r_z:+.4f} "
+            f"grav_x={gravity_x:+.4f} pitch_rate={pitch_rate:+.4f} | "
+            f"wheel_qd=({wheel_l_qd:+.3f},{wheel_r_qd:+.3f}) "
+            f"wheel_tau=({wheel_l_tau:+.2f},{wheel_r_tau:+.2f}) | "
+            f"Fwheel=({fwL:.1f},{fwR:.1f})N Fthigh={fthigh:.1f}N Fcalf={fcalf:.1f}N Fbase={fbase:.1f}N | "
+            f"L thigh q={q[thigh_l_id].item():+.3f} qt={qt[thigh_l_id].item():+.3f} "
+            f"qd={qd[thigh_l_id].item():+.3f} tau={tau[thigh_l_id].item():+.2f} | "
+            f"L calf q={q[calf_l_id].item():+.3f} qt={qt[calf_l_id].item():+.3f} "
+            f"qd={qd[calf_l_id].item():+.3f} tau={tau[calf_l_id].item():+.2f} | "
+            f"R thigh q={q[thigh_r_id].item():+.3f} qt={qt[thigh_r_id].item():+.3f} "
+            f"qd={qd[thigh_r_id].item():+.3f} tau={tau[thigh_r_id].item():+.2f} | "
+            f"R calf q={q[calf_r_id].item():+.3f} qt={qt[calf_r_id].item():+.3f} "
+            f"qd={qd[calf_r_id].item():+.3f} tau={tau[calf_r_id].item():+.2f}"
+        )
+
+    # Print the state before the first physics step.
+    _print_state("[INIT ]", done=False)
 
     with torch.inference_mode():
         while simulation_app.is_running():
 
-            # TEST：不用 policy，固定在 default joint target
+            # Save the state immediately BEFORE env.step().  If the environment
+            # terminates and auto-resets inside step(), these values are the last
+            # observable state before that step.
+            pre_root_z = robot.data.root_pos_w[0, 2].item()
+            pre_root_vz = robot.data.root_lin_vel_w[0, 2].item()
+
+            # TEST: do not use the policy; hold the default joint target.
             actions = torch.zeros(
                 (wrapped_env.num_envs, wrapped_env.num_actions),
                 device=wrapped_env.device,
@@ -439,35 +546,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
             step_result = wrapped_env.step(actions)
             obs = step_result[0]
+            done = bool(wrapped_env.reset_buf[0].item())
 
-            if steps % 20 == 0:
-                q = robot.data.joint_pos[0]
-                qt = robot.data.joint_pos_target[0]
-                qd = robot.data.joint_vel[0]
-                tau = robot.data.applied_torque[0]
+            # Print much more frequently than before.  The current robot usually
+            # terminates around ~53 steps, so every 5 steps shows the onset clearly.
+            if steps % 5 == 0 or done:
+                _print_state(f"[{steps:05d}]", done=done)
 
-                # print(
-                #     f"[{steps:05d}] "
-                #     f"L thigh q={q[thigh_l_id].item():+.3f} "
-                #     f"qt={qt[thigh_l_id].item():+.3f} "
-                #     f"qd={qd[thigh_l_id].item():+.3f} "
-                #     f"tau={tau[thigh_l_id].item():+.2f} | "
-
-                #     f"L calf q={q[calf_l_id].item():+.3f} "
-                #     f"qt={qt[calf_l_id].item():+.3f} "
-                #     f"qd={qd[calf_l_id].item():+.3f} "
-                #     f"tau={tau[calf_l_id].item():+.2f} | "
-
-                #     f"R thigh q={q[thigh_r_id].item():+.3f} "
-                #     f"qt={qt[thigh_r_id].item():+.3f} "
-                #     f"qd={qd[thigh_r_id].item():+.3f} "
-                #     f"tau={tau[thigh_r_id].item():+.2f} | "
-
-                #     f"R calf q={q[calf_r_id].item():+.3f} "
-                #     f"qt={qt[calf_r_id].item():+.3f} "
-                #     f"qd={qd[calf_r_id].item():+.3f} "
-                #     f"tau={tau[calf_r_id].item():+.2f}"
-                # )
+            if done:
+                print(
+                    f"[DONE ] step={steps} "
+                    f"pre_step_root_z={pre_root_z:+.4f} "
+                    f"pre_step_root_vz={pre_root_vz:+.4f} "
+                    "(state printed above may already be post-reset)"
+                )
 
             steps += 1
 

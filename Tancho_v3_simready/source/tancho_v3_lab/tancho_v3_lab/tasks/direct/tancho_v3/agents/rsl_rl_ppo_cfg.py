@@ -11,7 +11,7 @@ class TanchoV3PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     clip_actions = 1.0
 
     policy = RslRlPpoActorCriticCfg(
-        init_noise_std=0.1,
+        init_noise_std=0.2,
         actor_obs_normalization=True,
         critic_obs_normalization=True,
         actor_hidden_dims=[256, 256, 128],
@@ -28,6 +28,7 @@ class TanchoV3PPORunnerCfg(RslRlOnPolicyRunnerCfg):
         num_mini_batches=4,
         learning_rate=3.0e-4,
         schedule="fixed",
+        # schedule="adaptive",
         gamma=0.99,
         lam=0.95,
         desired_kl=0.01,

@@ -33,10 +33,10 @@ ASSET_DIR = Path(__file__).resolve().parents[3] / "assets" / "robots" / "Tancho_
 URDF_PATH = str(ASSET_DIR / "urdf" / "Tancho_v3.urdf")
 
 # -- 站姿參數 ---------------------------------------------------------------
-STAND_THIGH = -0.50
-STAND_CALF = 0.80
+STAND_THIGH = -0.45
+STAND_CALF = 1.30
 RESPAWN_ROOT_HEIGHT = 0.26
-BASE_HEIGHT_TARGET = 0.22
+BASE_HEIGHT_TARGET = 0.20
 IMU_POS_ROOT = (-0.00835741999, 0.0000000160456, -0.0294337942)
 IMU_ROT_ROOT = (0.707106781, 0.707106781, 0.0, 0.0)
 PPO_STEPS_PER_ITERATION = 24
@@ -81,24 +81,24 @@ class TanchoV3SceneCfg(InteractiveSceneCfg):
                 "joint_wheel_R": 0.0,
             },
         ),
-        soft_joint_pos_limit_factor=0.9,
+        soft_joint_pos_limit_factor=0.95,
         actuators={
             # 腿部 4 關節：位置控制 (implicit PD)
             "legs": ImplicitActuatorCfg(
                 joint_names_expr=["joint_thigh_L", "joint_calf_L",
                                   "joint_thigh_R", "joint_calf_R"],
-                stiffness=25.0,
-                damping=2.0,
-                effort_limit_sim=40.0,
-                velocity_limit_sim=1.0,
+                stiffness=30.0,#30.0
+                damping=1.0,#1.0
+                effort_limit_sim=12.5,
+                velocity_limit_sim=2,#20
             ),
             # 輪子 2 關節：MDP effort action；保留少量被動阻尼。
             "wheels": ImplicitActuatorCfg(
                 joint_names_expr=["joint_wheel_L", "joint_wheel_R"],
                 stiffness=0.0,
-                damping=0.3,
-                effort_limit_sim=2.0,
-                velocity_limit_sim=20.0,
+                damping=0.0,
+                effort_limit_sim=0.45,
+                velocity_limit_sim=188,
             ),
         },
     )
@@ -119,21 +119,22 @@ class TanchoV3SceneCfg(InteractiveSceneCfg):
 @configclass
 class ActionsCfg:
     """動作空間：腿部位置 + 輪子力矩（皆使用 Isaac Lab MDP action term）。"""
-
+    
     joint_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"],
         # 0.25 rad 無法在下沉前建立足夠的預載扭矩；放寬控制範圍，
         # 讓策略可主動伸腿支撐，而非只能等誤差變大後被動追趕。
-        scale=0.8,
+        scale=0.5,
         use_default_offset=True,
+        preserve_order=True,
     )
     # 實測 velocity target 在倒地前幾乎無法改變輪心位置；直接力矩可恢復控制權。
     # 名稱維持 joint_vel，以保持既有 checkpoint/action ordering 與監控腳本相容。
     joint_vel = mdp.JointEffortActionCfg(
         asset_name="robot",
         joint_names=["joint_wheel_L", "joint_wheel_R"],
-        scale=2.0,
+        scale=0.45,
     )
 
 
@@ -182,44 +183,32 @@ class ObservationsCfg:
 class TerminationsCfg:
     """終止條件。"""
 
-    time_out = TerminationTermCfg(func=mdp.time_out, time_out=True)
-    # 只有 base 碰地才終止；thigh/calf 碰撞保留在 collision reward 處理。
     base_contact = TerminationTermCfg(
-        func=mdp.illegal_contact,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["base_link_root"]),
-            "threshold": 10.0,
+    func=mdp.illegal_contact,
+    params={
+        "sensor_cfg": SceneEntityCfg("contact_forces", body_names=['thigh_L','thigh_R',"calf_L","calf_R",]),
+        "threshold": 10.0,#10.0
         },
     )
-    minimum_base_height = TerminationTermCfg(
+    
+    time_out = TerminationTermCfg(
+        func=mdp.time_out,
+        time_out=True,
+    )
+
+    base_below_minimum_height = TerminationTermCfg(
         func=cr.base_below_minimum_height,
         params={
             "minimum_height": 0.14,
-            "initial_height": 0.06,
-            "minimum_below_steps": 20,
-            "initial_below_steps": 100,
-            "enable_after_steps": POSTURE_CURRICULUM_ON_STEPS,
-            "ramp_steps": POSTURE_CURRICULUM_RAMP_STEPS,
+            "minimum_below_steps": 10,
         },
     )
-    sustained_leg_contact = TerminationTermCfg(
-        func=cr.sustained_illegal_contact,
-        params={
-            "sensor_cfg": SceneEntityCfg(
-                "contact_forces",
-                body_names=[".*thigh.*", ".*calf.*"],
-            ),
-            "threshold": 5.0,
-            "minimum_contact_steps": 10,
-            "initial_contact_steps": 50,
-            "enable_after_steps": LEG_CONTACT_TERMINATION_ON_STEPS,
-            "ramp_steps": LEG_CONTACT_TERMINATION_RAMP_STEPS,
-        },
-    )
-    # 超過約 46 度視為已失去可恢復站姿，避免接近躺平仍累積存活時間。
+
     bad_orientation = TerminationTermCfg(
         func=mdp.bad_orientation,
-        params={"limit_angle": 0.8},
+        params={
+            "limit_angle": 0.85,
+        },
     )
 
 
