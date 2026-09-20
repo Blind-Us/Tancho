@@ -16,6 +16,16 @@ def lin_vel_xy_l2(
     return torch.sum(torch.square(robot.data.root_lin_vel_b[:, :2]), dim=1)
 
 
+def ang_vel_z_l2(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Squared base yaw rate in the body frame."""
+
+    robot: Articulation = env.scene[asset_cfg.name]
+    return torch.square(robot.data.root_ang_vel_b[:, 2])
+
+
 # 雙輪接地  左右輪都有接觸地面時給分
 def wheel_ground_contact(
     env: ManagerBasedRLEnv,

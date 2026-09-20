@@ -3,10 +3,11 @@ import math
 import isaaclab.envs.mdp as mdp
 import isaaclab.sim as sim_utils
 from isaaclab.envs import ManagerBasedRLEnvCfg
-from isaaclab.managers import RewardTermCfg as RewardTerm, SceneEntityCfg
+from isaaclab.managers import EventTermCfg as EventTerm, RewardTermCfg as RewardTerm, SceneEntityCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 
+from . import custom_events as ce
 from . import custom_rewards as cr
 from .tancho_v3_env_cfg import (
     ActionsCfg,
@@ -64,7 +65,16 @@ class FlatRewardsCfg:
             },
         )
 
-        # 4. 降低水平移動速度
+        # 4. 抑制繞垂直軸原地旋轉（yaw rate / ang_z）
+        ang_vel_z = RewardTerm(
+            func=cr.ang_vel_z_l2,
+            weight=-0.5,
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+            },
+        )
+
+        # 5. 降低水平移動速度
         # x_dot -> 0
         lin_vel = RewardTerm(
             func=cr.lin_vel_xy_l2,
@@ -74,7 +84,7 @@ class FlatRewardsCfg:
             },
         )
 
-        # 5. wheel torque 不要長時間打滿
+        # 6. wheel torque 不要長時間打滿
         torque = RewardTerm(
             func=mdp.joint_torques_l2,
             weight=-1.0e-4,
@@ -98,6 +108,15 @@ class TanchoV3FlatSceneCfg(TanchoV3SceneCfg):
 
 
 @configclass
+class FlatPlayEventCfg(EventCfg):
+    direction_markers = EventTerm(
+        func=ce.visualize_tancho_directions,
+        mode="interval",
+        interval_range_s=(0.05, 0.05),
+    )
+
+
+@configclass
 class TanchoV3FlatEnvCfg(ManagerBasedRLEnvCfg):
     scene: TanchoV3FlatSceneCfg = TanchoV3FlatSceneCfg(num_envs=4096, env_spacing=3.0)
     actions: ActionsCfg = ActionsCfg()
@@ -112,3 +131,19 @@ class TanchoV3FlatEnvCfg(ManagerBasedRLEnvCfg):
         self.decimation = 2
         self.episode_length_s = 20.0
         self.sim.dt = 0.005
+
+
+@configclass
+class TanchoV3FlatPlayEnvCfg(TanchoV3FlatEnvCfg):
+    """Play-only config with the trained push curriculum already enabled."""
+
+    curriculum: None = None
+    events: FlatPlayEventCfg = FlatPlayEventCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 1
+        self.events.push_robot.interval_range_s = (10.0, 10.0)
+        self.events.push_robot.params["velocity_range"] = {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}
+        self.events.push_robot.params["debug_vis"] = True
+        self.events.push_robot.params["push_probability"] = 1.0

@@ -67,6 +67,11 @@ class TanchoV3SceneCfg(InteractiveSceneCfg):
             asset_path=URDF_PATH,
             fix_base=False,
             merge_fixed_joints=True,
+            # Adjacent hip/knee parts intentionally share their mechanical
+            # joint envelope.  Treating those pairs as self-contact creates
+            # artificial internal impulses, so keep articulation self-contact
+            # explicitly disabled instead of relying on importer defaults.
+            self_collision=False,
             joint_drive=None,
             activate_contact_sensors=True,
         ),
@@ -97,7 +102,7 @@ class TanchoV3SceneCfg(InteractiveSceneCfg):
             "wheels": ImplicitActuatorCfg(
                 joint_names_expr=["joint_wheel_L", "joint_wheel_R"],
                 stiffness=0.0,
-                damping=0.0,
+                damping=0.1,
                 effort_limit_sim=0.45,
                 velocity_limit_sim=188,
             ),
@@ -150,9 +155,9 @@ class CommandsCfg:
         rel_heading_envs=0.0,
         heading_command=False,
         ranges=mdp.UniformVelocityCommandCfg.Ranges(
-            lin_vel_x=(0.02, 0.02),
+            lin_vel_x=(0.0, 0.0),
             lin_vel_y=(0.0, 0.0),
-            ang_vel_z=(-1.57, 1.57),
+            ang_vel_z=(0.0, 0.0),
             heading=(-3.14, 3.14),
         ),
     )
@@ -205,12 +210,6 @@ class TerminationsCfg:
     #     },
     # )
 
-    bad_orientation = TerminationTermCfg(
-        func=mdp.bad_orientation,
-        params={
-            "limit_angle": 0.85,
-        },
-    )
 
 
 @configclass
@@ -253,25 +252,22 @@ class EventCfg:
 
     # 速度範圍為零，因此 curriculum 啟動前不施加推力。
     push_robot = EventTerm(
-        func=mdp.push_by_setting_velocity,
+        func=ce.push_tancho_along_wheel_tangent,
         mode="interval",
         interval_range_s=(16.0, 16.0),
-        params={"velocity_range": {"x": (0.0, 0.0), "y": (0.0, 0.0)}},
+        params={
+            "velocity_range": {"x": (0.0, 0.0), "y": (0.0, 0.0)},
+            "push_probability": 0.5,
+        },
     )
 
 
 @configclass
 class CurriculumCfg:
-    """在 PPO iteration 1500 啟動速度指令與推力 curriculum。"""
+    """在 PPO iteration 1500 僅啟動 XY 平面推力 curriculum。"""
 
-    enable_velocity_commands = CurriculumTermCfg(
-        func=mdp.modify_env_param,
-        params={
-            "address": "command_manager.cfg.base_velocity.rel_standing_envs",
-            "modify_fn": cr.curriculum_enable_velocity,
-            "modify_params": {"num_steps": CURRICULUM_VEL_ON_STEPS, "target": 0.5},
-        },
-    )
+    # 本研究階段不自動產生移動或旋轉命令；curriculum 只保留推力。
+    enable_velocity_commands: CurriculumTermCfg | None = None
     enable_push = CurriculumTermCfg(
         func=mdp.modify_env_param,
         params={
@@ -279,7 +275,7 @@ class CurriculumCfg:
             "modify_fn": cr.curriculum_enable_push,
             "modify_params": {
                 "num_steps": CURRICULUM_PUSH_ON_STEPS,
-                "velocity_range": {"x": (-0.5, 0.5), "y": (-0.0 ,0.0)},
+                "velocity_range": {"x": (-0.5, 0.5), "y": (-0.5 ,0.5)},
             },
         },
     )

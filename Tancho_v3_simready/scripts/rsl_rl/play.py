@@ -1,95 +1,72 @@
-"""Minimal playback script for a trained Tancho V3 RSL-RL policy."""
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+"""Script to play a checkpoint if an RL agent from RSL-RL."""
+
+"""Launch Isaac Sim Simulator first."""
 
 import argparse
-import os
 import sys
 
 from isaaclab.app import AppLauncher
 
+# local imports
+import cli_args  # isort: skip
 
-# =============================================================================
-# CLI
-# =============================================================================
-
-parser = argparse.ArgumentParser(
-    description="Play a trained RSL-RL policy for Tancho V3."
-)
-
+# add argparse arguments
+parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
+parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
+parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument(
-    "--num_envs",
-    type=int,
-    default=1,
-    help="Number of environments.",
+    "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
 )
-
+parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
+parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument(
-    "--task",
-    type=str,
-    required=True,
-    help="Registered Isaac Lab task name.",
+    "--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point."
 )
-
+parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 parser.add_argument(
-    "--agent",
-    type=str,
-    default="rsl_rl_cfg_entry_point",
-    help="Agent configuration entry point.",
+    "--use_pretrained_checkpoint",
+    action="store_true",
+    help="Use the pre-trained checkpoint from Nucleus.",
 )
-
-parser.add_argument(
-    "--seed",
-    type=int,
-    default=None,
-    help="Environment seed.",
-)
-
-parser.add_argument(
-    "--load_run",
-    type=str,
-    default=".*",
-    help="Run folder name or regex.",
-)
-
-parser.add_argument(
-    "--checkpoint",
-    type=str,
-    default="model_.*.pt",
-    help="Checkpoint regex or direct .pt path.",
-)
-
-# 0 = unlimited
-parser.add_argument(
-    "--num_steps",
-    type=int,
-    default=0,
-    help="Maximum inference steps. 0 = unlimited.",
-)
-
-# Isaac Lab launcher arguments
+parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+# append RSL-RL cli arguments
+cli_args.add_rsl_rl_args(parser)
+# append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
-
+# parse the arguments
 args_cli, hydra_args = parser.parse_known_args()
+# always enable cameras to record video
+if args_cli.video:
+    args_cli.enable_cameras = True
 
-# Hydra should only see Hydra arguments
+# clear out sys.argv for Hydra
 sys.argv = [sys.argv[0]] + hydra_args
 
-
-# =============================================================================
-# Launch Isaac Sim
-# =============================================================================
-
+# launch omniverse app
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
+"""Check for installed RSL-RL version."""
 
-# =============================================================================
-# Imports after Isaac Sim startup
-# =============================================================================
+import importlib.metadata as metadata
+
+from packaging import version
+
+installed_version = metadata.version("rsl-rl-lib")
+
+"""Rest everything follows."""
+
+import os
+import time
 
 import gymnasium as gym
 import torch
-
-from rsl_rl.runners import OnPolicyRunner
+from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 
 from isaaclab.envs import (
     DirectMARLEnv,
@@ -98,358 +75,164 @@ from isaaclab.envs import (
     ManagerBasedRLEnvCfg,
     multi_agent_to_single_agent,
 )
+from isaaclab.utils.assets import retrieve_file_path
+from isaaclab.utils.dict import print_dict
 
 from isaaclab_rl.rsl_rl import (
     RslRlBaseRunnerCfg,
     RslRlVecEnvWrapper,
+    export_policy_as_jit,
+    export_policy_as_onnx,
+    handle_deprecated_rsl_rl_cfg,
+    handle_deprecated_rsl_rl_checkpoint,
 )
+from isaaclab_rl.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 
+import isaaclab_tasks  # noqa: F401
+import tancho_v3_lab.tasks  # noqa: F401
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
-# Register Tancho tasks
-import tancho_v3_lab.tasks  # noqa: F401
+# PLACEHOLDER: Extension template (do not remove this comment)
 
 
-# =============================================================================
-# RSL-RL config conversion
-# =============================================================================
+@hydra_task_config(args_cli.task, args_cli.agent)
+def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
+    """Play with RSL-RL agent."""
+    # grab task name for checkpoint path
+    task_name = args_cli.task.split(":")[-1]
+    train_task_name = task_name.replace("-Play", "")
 
-def to_rsl_rl_cfg(agent_cfg):
-    """
-    Convert Isaac Lab RSL-RL config to the split actor/critic format
-    expected by the installed RSL-RL version.
-    """
+    # override configurations with non-hydra CLI arguments
+    agent_cfg: RslRlBaseRunnerCfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
+    env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
 
-    data = agent_cfg.to_dict()
+    # handle deprecated configurations
+    agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, installed_version)
 
-    policy_cfg = dict(data["policy"])
-    algorithm_cfg = dict(data["algorithm"])
+    # set the environment seed
+    # note: certain randomizations occur in the environment initialization so we set the seed here
+    env_cfg.seed = agent_cfg.seed
+    env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
 
-    # Everything outside policy / algorithm belongs to runner config.
-    runner_cfg = {
-        key: value
-        for key, value in data.items()
-        if key not in {
-            "policy",
-            "algorithm",
-            "class_name",
-        }
-    }
-
-    # -------------------------------------------------------------------------
-    # Actor
-    # -------------------------------------------------------------------------
-
-    actor_cfg = {
-        "class_name": "MLPModel",
-
-        "hidden_dims": policy_cfg.get(
-            "actor_hidden_dims",
-            [256, 256, 128],
-        ),
-
-        "activation": policy_cfg.get(
-            "activation",
-            "elu",
-        ),
-
-        "obs_normalization": policy_cfg.get(
-            "actor_obs_normalization",
-            False,
-        ),
-
-        "distribution_cfg": {
-            "class_name": "GaussianDistribution",
-
-            "init_std": policy_cfg.get(
-                "init_noise_std",
-                1.0,
-            ),
-        },
-    }
-
-    # -------------------------------------------------------------------------
-    # Critic
-    # -------------------------------------------------------------------------
-
-    critic_cfg = {
-        "class_name": "MLPModel",
-
-        "hidden_dims": policy_cfg.get(
-            "critic_hidden_dims",
-            [256, 256, 128],
-        ),
-
-        "activation": policy_cfg.get(
-            "activation",
-            "elu",
-        ),
-
-        "obs_normalization": policy_cfg.get(
-            "critic_obs_normalization",
-            False,
-        ),
-    }
-
-    # -------------------------------------------------------------------------
-    # PPO
-    # -------------------------------------------------------------------------
-
-    algorithm_cfg["class_name"] = "PPO"
-
-    # Legacy option not used by current installed RSL-RL.
-    algorithm_cfg.pop(
-        "use_spo",
-        None,
-    )
-
-    # -------------------------------------------------------------------------
-    # Observation groups
-    # -------------------------------------------------------------------------
-
-    runner_cfg["obs_groups"] = {
-        "actor": ["policy"],
-        "critic": ["policy"],
-        "policy": ["policy"],
-    }
-
-    runner_cfg.setdefault(
-        "multi_gpu",
-        None,
-    )
-
-    # -------------------------------------------------------------------------
-    # Final config
-    # -------------------------------------------------------------------------
-
-    return {
-        **runner_cfg,
-        "actor": actor_cfg,
-        "critic": critic_cfg,
-        "algorithm": algorithm_cfg,
-    }
-
-
-# =============================================================================
-# Main
-# =============================================================================
-
-@hydra_task_config(
-    args_cli.task,
-    args_cli.agent,
-)
-def main(
-    env_cfg: (
-        ManagerBasedRLEnvCfg
-        | DirectRLEnvCfg
-        | DirectMARLEnvCfg
-    ),
-    agent_cfg: RslRlBaseRunnerCfg,
-):
-    """Load a trained checkpoint and run inference."""
-
-    # -------------------------------------------------------------------------
-    # Environment config
-    # -------------------------------------------------------------------------
-
-    env_cfg.scene.num_envs = args_cli.num_envs
-
-    env_cfg.seed = (
-        args_cli.seed
-        if args_cli.seed is not None
-        else agent_cfg.seed
-    )
-
-    if args_cli.device is not None:
-        env_cfg.sim.device = args_cli.device
-
-    # -------------------------------------------------------------------------
-    # Resolve checkpoint
-    # -------------------------------------------------------------------------
-
-    log_root_path = os.path.abspath(
-        os.path.join(
-            "logs",
-            "rsl_rl",
-            agent_cfg.experiment_name,
-        )
-    )
-
-    if os.path.isfile(args_cli.checkpoint):
-
-        resume_path = os.path.abspath(
-            args_cli.checkpoint
-        )
-
+    # specify directory for logging experiments
+    log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
+    log_root_path = os.path.abspath(log_root_path)
+    print(f"[INFO] Loading experiment from directory: {log_root_path}")
+    if args_cli.use_pretrained_checkpoint:
+        resume_path = get_published_pretrained_checkpoint("rsl_rl", train_task_name)
+        if not resume_path:
+            print("[INFO] Unfortunately a pre-trained checkpoint is currently unavailable for this task.")
+            return
+    elif args_cli.checkpoint:
+        resume_path = retrieve_file_path(args_cli.checkpoint)
     else:
+        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
-        resume_path = get_checkpoint_path(
-            log_root_path,
-            args_cli.load_run,
-            args_cli.checkpoint,
-        )
+    log_dir = os.path.dirname(resume_path)
 
-    print(
-        f"[INFO] Loading checkpoint:\n"
-        f"       {resume_path}"
-    )
+    # set the log directory for the environment (works for all environment types)
+    env_cfg.log_dir = log_dir
 
-    # -------------------------------------------------------------------------
-    # Create environment
-    # -------------------------------------------------------------------------
+    # create isaac environment
+    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
 
-    env = gym.make(
-        args_cli.task,
-        cfg=env_cfg,
-    )
+    # convert to single-agent instance if required by the RL algorithm
+    if isinstance(env.unwrapped, DirectMARLEnv):
+        env = multi_agent_to_single_agent(env)
 
-    if isinstance(
-        env.unwrapped,
-        DirectMARLEnv,
-    ):
-        env = multi_agent_to_single_agent(
-            env
-        )
+    # wrap for video recording
+    if args_cli.video:
+        video_kwargs = {
+            "video_folder": os.path.join(log_dir, "videos", "play"),
+            "step_trigger": lambda step: step == 0,
+            "video_length": args_cli.video_length,
+            "disable_logger": True,
+        }
+        print("[INFO] Recording videos during training.")
+        print_dict(video_kwargs, nesting=4)
+        env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
-    # -------------------------------------------------------------------------
-    # Isaac Lab RSL-RL wrapper
-    # -------------------------------------------------------------------------
+    # wrap around environment for rsl-rl
+    env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
-    env = RslRlVecEnvWrapper(
-        env,
-        clip_actions=getattr(
-            agent_cfg,
-            "clip_actions",
-            None,
-        ),
-    )
+    print(f"[INFO]: Loading model checkpoint from: {resume_path}")
+    # load previously trained model
+    if agent_cfg.class_name == "OnPolicyRunner":
+        runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+    elif agent_cfg.class_name == "DistillationRunner":
+        runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+    else:
+        raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
+    # convert pre-5.0 published checkpoints to the layout expected by rsl-rl >= 5.0 (no-op otherwise)
+    resume_path = handle_deprecated_rsl_rl_checkpoint(resume_path, installed_version)
+    runner.load(resume_path)
 
-    # -------------------------------------------------------------------------
-    # Build compatible RSL-RL config
-    # -------------------------------------------------------------------------
+    # obtain the trained policy for inference
+    policy = runner.get_inference_policy(device=env.unwrapped.device)
 
-    runner_cfg = to_rsl_rl_cfg(
-        agent_cfg
-    )
+    # export the trained policy to JIT and ONNX formats
+    export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
 
-    # -------------------------------------------------------------------------
-    # Create runner
-    # -------------------------------------------------------------------------
+    if version.parse(installed_version) >= version.parse("4.0.0"):
+        # use the new export functions for rsl-rl >= 4.0.0
+        runner.export_policy_to_jit(path=export_model_dir, filename="policy.pt")
+        runner.export_policy_to_onnx(path=export_model_dir, filename="policy.onnx")
+    else:
+        # extract the neural network for rsl-rl < 4.0.0
+        if version.parse(installed_version) >= version.parse("2.3.0"):
+            policy_nn = runner.alg.policy
+        else:
+            policy_nn = runner.alg.actor_critic
 
-    runner = OnPolicyRunner(
-        env,
-        runner_cfg,
-        log_dir=None,
-        device=env.unwrapped.device,
-    )
+        # extract the normalizer
+        if hasattr(policy_nn, "actor_obs_normalizer"):
+            normalizer = policy_nn.actor_obs_normalizer
+        elif hasattr(policy_nn, "student_obs_normalizer"):
+            normalizer = policy_nn.student_obs_normalizer
+        else:
+            normalizer = None
 
-    # -------------------------------------------------------------------------
-    # Load checkpoint
-    # -------------------------------------------------------------------------
+        # export to JIT and ONNX
+        export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
+        export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
 
-    runner.load(
-        resume_path
-    )
+    dt = env.unwrapped.step_dt
 
-    # -------------------------------------------------------------------------
-    # Get inference policy
-    # -------------------------------------------------------------------------
-
-    policy = runner.get_inference_policy(
-        device=env.unwrapped.device
-    )
-
-    # -------------------------------------------------------------------------
-    # Initial observation
-    # -------------------------------------------------------------------------
-
+    # reset environment
     obs = env.get_observations()
-
-    # -------------------------------------------------------------------------
-    # Playback loop
-    # -------------------------------------------------------------------------
-
-    print("[INFO] Starting trained-policy playback.")
-    print("[INFO] Playback will continue until:")
-    print("       - the Isaac Sim window is closed, or")
-    print("       - --num_steps is reached if > 0.")
-
-    steps = 0
-
-    try:
-
+    timestep = 0
+    # simulate environment
+    while simulation_app.is_running():
+        start_time = time.time()
+        # run everything in inference mode
         with torch.inference_mode():
+            # agent stepping
+            actions = policy(obs)
+            # env stepping
+            obs, _, dones, _ = env.step(actions)
+            # reset recurrent states for episodes that have terminated
+            if version.parse(installed_version) >= version.parse("4.0.0"):
+                policy.reset(dones)
+            else:
+                policy_nn.reset(dones)
+        if args_cli.video:
+            timestep += 1
+            # Exit the play loop after recording one video
+            if timestep == args_cli.video_length:
+                break
 
-            while simulation_app.is_running():
+        # time delay for real-time evaluation
+        sleep_time = dt - (time.time() - start_time)
+        if args_cli.real_time and sleep_time > 0:
+            time.sleep(sleep_time)
 
-                # -------------------------------------------------------------
-                # Trained policy inference
-                # -------------------------------------------------------------
+    # close the simulator
+    env.close()
 
-                actions = policy(obs)
-
-                # -------------------------------------------------------------
-                # Environment step
-                # -------------------------------------------------------------
-
-                step_result = env.step(
-                    actions
-                )
-
-                # Different wrapper versions may return 4 or 5 values.
-                if len(step_result) == 4:
-
-                    (
-                        obs,
-                        rewards,
-                        dones,
-                        extras,
-                    ) = step_result
-
-                else:
-
-                    (
-                        obs,
-                        privileged_obs,
-                        rewards,
-                        dones,
-                        extras,
-                    ) = step_result
-
-                steps += 1
-
-                # -------------------------------------------------------------
-                # Optional inference step limit
-                # -------------------------------------------------------------
-
-                if (
-                    args_cli.num_steps > 0
-                    and steps >= args_cli.num_steps
-                ):
-
-                    print(
-                        f"[INFO] Reached "
-                        f"{steps} inference steps."
-                    )
-
-                    break
-
-    finally:
-
-        env.close()
-
-
-# =============================================================================
-# Entry point
-# =============================================================================
 
 if __name__ == "__main__":
-
-    try:
-
-        main()
-
-    finally:
-
-        simulation_app.close()
+    # run the main function
+    main()
+    # close sim app
+    simulation_app.close()

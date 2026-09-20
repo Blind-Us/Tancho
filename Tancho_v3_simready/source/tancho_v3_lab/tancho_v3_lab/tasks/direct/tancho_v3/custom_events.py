@@ -162,8 +162,8 @@ def _resolve_mesh_path(urdf_path: Path, filename: str) -> Path:
     raise FileNotFoundError(f"Collision mesh {filename!r} referenced by {urdf_path} was not found")
 
 
-def _mesh_support_radius(urdf_path: Path, urdf_root: ET.Element) -> float:
-    """Get the maximum wheel collision radius from both wheel links."""
+def _wheel_support_radius(urdf_path: Path, urdf_root: ET.Element) -> float:
+    """Get the maximum wheel collision radius from mesh or cylinder geometry."""
 
     side_radii: list[float] = []
     for link_name in WHEEL_LINK_NAMES:
@@ -172,6 +172,10 @@ def _mesh_support_radius(urdf_path: Path, urdf_root: ET.Element) -> float:
             raise RuntimeError(f"URDF is missing required wheel link {link_name!r}")
         link_radius = 0.0
         for collision in link.findall("collision"):
+            cylinder = collision.find("geometry/cylinder")
+            if cylinder is not None:
+                link_radius = max(link_radius, float(cylinder.get("radius", "0")))
+                continue
             mesh = collision.find("geometry/mesh")
             if mesh is None or mesh.get("filename") is None:
                 continue
@@ -194,12 +198,36 @@ def _mesh_support_radius(urdf_path: Path, urdf_root: ET.Element) -> float:
                 # the support circle; no guessed wheel radius is introduced.
                 link_radius = max(link_radius, math.hypot(vertex_in_link[0], vertex_in_link[1]))
         if link_radius <= 0.0:
-            raise RuntimeError(f"No wheel collision mesh found for {link_name!r}")
+            raise RuntimeError(f"No supported wheel collision geometry found for {link_name!r}")
         side_radii.append(link_radius)
 
     if max(side_radii) - min(side_radii) > 1.0e-5:
         raise RuntimeError(f"Left/right wheel support radii disagree: {side_radii}")
     return sum(side_radii) / len(side_radii)
+
+
+def _round_tire_support_distance(link: ET.Element, link_rotation: Sequence[Sequence[float]]) -> float:
+    """Return vertical support distance of a cylindrical tire from its link origin."""
+
+    collision = next(
+        (item for item in link.findall("collision") if item.find("geometry/cylinder") is not None),
+        None,
+    )
+    if collision is None:
+        raise RuntimeError(f"{link.get('name')!r} has no cylindrical tire collision")
+    cylinder = collision.find("geometry/cylinder")
+    assert cylinder is not None
+    radius = float(cylinder.get("radius", "0"))
+    half_length = 0.5 * float(cylinder.get("length", "0"))
+    origin = collision.find("origin")
+    translation = _parse_xyz(origin.get("xyz") if origin is not None else None)
+    collision_rotation = _rpy_matrix(_parse_xyz(origin.get("rpy") if origin is not None else None))
+    world_collision_rotation = _mat_mul(link_rotation, collision_rotation)
+    center_z = _mat_vec_mul(link_rotation, translation)[2]
+    axis_z = world_collision_rotation[2][2]
+    radial_z = radius * math.sqrt(max(0.0, 1.0 - axis_z * axis_z))
+    axial_z = half_length * abs(axis_z)
+    return float(-(center_z - radial_z - axial_z))
 
 
 def _wheel_poses_relative_to_root(
@@ -266,24 +294,16 @@ def _wheel_poses_relative_to_root(
 
 
 def canonical_wheel_support_height(wheel_phase_rad: float) -> float:
-    """Evaluate the single canonical TPU support profile ``h(q)``.
-
-    Both physical wheels use the same TPU part.  Accordingly this function
-    evaluates only ``wheel_tpu.stl`` in the common nominal leg frame.  The
-    right collision uses that exact mesh at the mirrored axial mounting offset.
-    Since this translation is parallel to the spin axis, equal phases still
-    return the same support height for both sides by design.
-    """
+    """Evaluate the phase-invariant support height of the round tire collider."""
 
     urdf_root = ET.parse(URDF_PATH).getroot()
     positions = dict(NOMINAL_JOINT_POSITIONS)
     positions["joint_wheel_L"] = float(wheel_phase_rad)
     _, rotation = _wheel_poses_relative_to_root(urdf_root, positions)[0]
-    minimum_z = min(
-        _mat_vec_mul(rotation, vertex)[2]
-        for vertex in _read_stl_vertices(_resolve_mesh_path(URDF_PATH, CANONICAL_TPU_MESH))
-    )
-    return float(-minimum_z)
+    link = urdf_root.find("link[@name='wheel_L']")
+    if link is None:
+        raise RuntimeError("URDF is missing wheel_L")
+    return _round_tire_support_distance(link, rotation)
 
 
 def _load_reset_geometry() -> TanchoResetGeometry:
@@ -301,9 +321,8 @@ def _load_reset_geometry() -> TanchoResetGeometry:
     nominal_support = canonical_wheel_support_height(left_phase)
     return TanchoResetGeometry(
         wheel_center_rel_root_m=tuple(pose[0] for pose in poses),
-        wheel_support_radius_m=_mesh_support_radius(URDF_PATH, urdf_root),
-        # One canonical h(q) result is intentionally broadcast.  Do not
-        # independently sample left/right export meshes here.
+        wheel_support_radius_m=_wheel_support_radius(URDF_PATH, urdf_root),
+        # A round tire is phase invariant; one result is intentionally broadcast.
         wheel_support_distance_m=(nominal_support, nominal_support),
     )
 
@@ -322,7 +341,9 @@ RESET_METADATA = {
     "wheel_center_rel_root_m": WHEEL_CENTER_REL_ROOT_M,
     "wheel_support_radius_m": WHEEL_SUPPORT_RADIUS_M,
     "wheel_support_distance_m": WHEEL_SUPPORT_DISTANCE_M,
-    "canonical_tpu_mesh": CANONICAL_TPU_MESH,
+    "wheel_collision_geometry": "cylinder",
+    "wheel_collision_radius_m": WHEEL_SUPPORT_RADIUS_M,
+    "canonical_tpu_visual_mesh": CANONICAL_TPU_MESH,
     "contact_preload_m": RESET_CONTACT_PRELOAD_M,
     "target_root_height_m": TARGET_ROOT_HEIGHT_M,
     "wheel_gap_m": RESET_GEOMETRY.wheel_gap_m,
@@ -337,8 +358,6 @@ def _load_fixed_reset_geometry() -> TanchoResetGeometry:
     root = ET.parse(FIXED_URDF_PATH).getroot()
     centers = []
     supports = []
-    mesh_path = _resolve_mesh_path(FIXED_URDF_PATH, CANONICAL_TPU_MESH)
-    vertices = _read_stl_vertices(mesh_path)
     for side in ("L", "R"):
         joint = root.find(f"joint[@name='joint_wheel_{side}']")
         link = root.find(f"link[@name='wheel_{side}']")
@@ -347,31 +366,13 @@ def _load_fixed_reset_geometry() -> TanchoResetGeometry:
         joint_origin = joint.find("origin")
         center = _parse_xyz(joint_origin.get("xyz") if joint_origin is not None else None)
         rotation = _rpy_matrix(_parse_xyz(joint_origin.get("rpy") if joint_origin is not None else None))
-        collision = link.find(f"collision[@name='tpu_canonical_{side}']")
-        if collision is None:
-            raise RuntimeError(f"Fixed asset is missing tpu_canonical_{side}")
-        collision_origin = collision.find("origin")
-        translation = _parse_xyz(collision_origin.get("xyz") if collision_origin is not None else None)
-        collision_rotation = _rpy_matrix(
-            _parse_xyz(collision_origin.get("rpy") if collision_origin is not None else None)
-        )
-        minimum_z = min(
-            _mat_vec_mul(
-                rotation,
-                tuple(
-                    translation[index] + _mat_vec_mul(collision_rotation, vertex)[index]
-                    for index in range(3)
-                ),
-            )[2]
-            for vertex in vertices
-        )
         centers.append(center)
-        supports.append(float(-minimum_z))
+        supports.append(_round_tire_support_distance(link, rotation))
     if abs(supports[0] - supports[1]) > 1.0e-9:
         raise RuntimeError(f"Fixed wheel support heights are not symmetric: {supports}")
     return TanchoResetGeometry(
         wheel_center_rel_root_m=tuple(centers),
-        wheel_support_radius_m=_mesh_support_radius(FIXED_URDF_PATH, root),
+        wheel_support_radius_m=_wheel_support_radius(FIXED_URDF_PATH, root),
         wheel_support_distance_m=(supports[0], supports[0]),
     )
 
@@ -379,6 +380,154 @@ def _load_fixed_reset_geometry() -> TanchoResetGeometry:
 FIXED_RESET_GEOMETRY = _load_fixed_reset_geometry()
 FIXED_TARGET_ROOT_HEIGHT_M = FIXED_RESET_GEOMETRY.target_root_height_m
 FIXED_NOMINAL_JOINT_POSITIONS = {"joint_wheel_L": 0.0, "joint_wheel_R": 0.0}
+
+
+def push_tancho_along_wheel_tangent(
+    env,
+    env_ids,
+    velocity_range: Mapping[str, tuple[float, float]],
+    asset_name: str = "robot",
+    debug_vis: bool = False,
+    push_probability: float = 1.0,
+):
+    """Apply a body-frame planar velocity impulse without a yaw impulse.
+
+    Isaac Lab's generic ``push_by_setting_velocity`` interprets x/y in the
+    world frame.  Here x is Tancho's wheel rolling tangent and y is its lateral
+    direction.  Both are rotated into world XY using the current root yaw;
+    root angular velocity is intentionally left unchanged.
+    """
+
+    import torch
+
+    if not 0.0 <= push_probability <= 1.0:
+        raise ValueError(f"push_probability must be within [0, 1], got {push_probability}")
+    if push_probability < 1.0:
+        selected = torch.rand(len(env_ids), device=env.device) < push_probability
+        env_ids = env_ids[selected]
+        if len(env_ids) == 0:
+            return
+
+    unsupported = {key: limits for key, limits in velocity_range.items() if key not in {"x", "y"}}
+    if unsupported:
+        raise ValueError(
+            "Tancho planar push only accepts body-frame x/y ranges; "
+            f"unsupported components: {unsupported}"
+        )
+
+    asset = env.scene[asset_name]
+    quat = asset.data.root_quat_w[env_ids]  # w, x, y, z
+    w, x, y, z = quat.unbind(dim=-1)
+    forward_xy = torch.stack(
+        (
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y + w * z),
+        ),
+        dim=-1,
+    )
+    forward_xy = forward_xy / torch.linalg.vector_norm(forward_xy, dim=-1, keepdim=True).clamp_min(1.0e-9)
+
+    x_min, x_max = velocity_range.get("x", (0.0, 0.0))
+    y_min, y_max = velocity_range.get("y", (0.0, 0.0))
+    delta_x = torch.empty((len(env_ids), 1), device=asset.device).uniform_(x_min, x_max)
+    delta_y = torch.empty((len(env_ids), 1), device=asset.device).uniform_(y_min, y_max)
+    lateral_xy = torch.stack((-forward_xy[:, 1], forward_xy[:, 0]), dim=-1)
+    delta_velocity_xy = forward_xy * delta_x + lateral_xy * delta_y
+    delta_magnitude = torch.linalg.vector_norm(delta_velocity_xy, dim=-1)
+    velocity_w = asset.data.root_vel_w[env_ids].clone()
+    velocity_w[:, :2] += delta_velocity_xy
+    asset.write_root_velocity_to_sim(velocity_w, env_ids=env_ids)
+
+    if debug_vis:
+        # Keep the signed world direction so the continuously updated body
+        # marker shows the impulse that was actually applied at that instant.
+        env._tancho_last_push_world_xy = delta_velocity_xy / delta_magnitude[:, None].clamp_min(1.0e-9)
+        env._tancho_last_push_magnitude = delta_magnitude
+        env._tancho_push_visible_until_step = int(env.common_step_counter) + max(
+            1, math.ceil(1.0 / env.step_dt)
+        )
+
+        if len(env_ids) == 1:
+            print(
+                "[TANCHO PUSH] "
+                f"body_xy=({delta_x[0, 0].item():+.4f}, {delta_y[0, 0].item():+.4f}) m/s, "
+                f"world_xy=({delta_velocity_xy[0, 0].item():+.4f}, "
+                f"{delta_velocity_xy[0, 1].item():+.4f}) m/s"
+            )
+
+
+def visualize_tancho_directions(env, env_ids, asset_name: str = "robot"):
+    """Draw body-forward, latest impulse, and policy wheel-torque directions.
+
+    Blue is the current body +X rolling tangent, red is the last signed push
+    direction in the world frame, and green is the translational component of
+    the policy response inferred from the mean applied wheel torque.
+    """
+
+    import torch
+    from isaaclab.markers import VisualizationMarkers
+    from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG, RED_ARROW_X_MARKER_CFG
+
+    asset = env.scene[asset_name]
+    if not hasattr(env, "_tancho_direction_visualizers"):
+        env._tancho_direction_visualizers = {
+            "normal": VisualizationMarkers(
+                BLUE_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/TanchoNormalDirection")
+            ),
+            "push": VisualizationMarkers(
+                RED_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/TanchoPushDirection")
+            ),
+            "policy": VisualizationMarkers(
+                GREEN_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/TanchoPolicyDirection")
+            ),
+        }
+        wheel_ids, _ = asset.find_joints(["joint_wheel_L", "joint_wheel_R"], preserve_order=True)
+        env._tancho_wheel_joint_ids = wheel_ids
+
+    quat = asset.data.root_quat_w[env_ids]
+    w, x, y, z = quat.unbind(dim=-1)
+    forward_xy = torch.stack(
+        (1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + w * z)), dim=-1
+    )
+    forward_xy = forward_xy / torch.linalg.vector_norm(forward_xy, dim=-1, keepdim=True).clamp_min(1.0e-9)
+
+    wheel_torque = asset.data.applied_torque[env_ids][:, env._tancho_wheel_joint_ids]
+    mean_torque = wheel_torque.mean(dim=1)
+    policy_xy = forward_xy * torch.where(mean_torque[:, None] >= 0.0, 1.0, -1.0)
+
+    push_xy = getattr(env, "_tancho_last_push_world_xy", forward_xy)
+    push_magnitude = getattr(
+        env, "_tancho_last_push_magnitude", torch.zeros(len(env_ids), device=asset.device)
+    )
+    if int(env.common_step_counter) >= getattr(env, "_tancho_push_visible_until_step", -1):
+        push_magnitude = torch.zeros_like(push_magnitude)
+    if push_xy.shape[0] != len(env_ids):
+        push_xy = push_xy[env_ids]
+        push_magnitude = push_magnitude[env_ids]
+
+    def arrow_quaternion(direction_xy):
+        heading = torch.atan2(direction_xy[:, 1], direction_xy[:, 0])
+        zeros = torch.zeros_like(heading)
+        return torch.stack((torch.cos(0.5 * heading), zeros, zeros, torch.sin(0.5 * heading)), dim=-1)
+
+    body_pos = asset.data.root_pos_w[env_ids].clone()
+    arrow_origin = body_pos.clone()
+    arrow_origin[:, 2] += 0.28
+
+    # All arrows share one origin and one shaft thickness.  Only their length
+    # changes, so magnitude can be compared without a size/position confound.
+    normal_scale = torch.tensor((0.65, 0.14, 0.14), device=asset.device).repeat(len(env_ids), 1)
+    push_scale = torch.ones((len(env_ids), 3), device=asset.device)
+    push_scale[:, 0] = push_magnitude / math.sqrt(0.5)
+    push_scale[:, 1:] = 0.14
+    policy_scale = torch.ones((len(env_ids), 3), device=asset.device)
+    policy_scale[:, 0] = mean_torque.abs() / 0.45
+    policy_scale[:, 1:] = 0.14
+
+    visualizers = env._tancho_direction_visualizers
+    visualizers["normal"].visualize(arrow_origin, arrow_quaternion(forward_xy), normal_scale)
+    visualizers["push"].visualize(arrow_origin, arrow_quaternion(push_xy), push_scale)
+    visualizers["policy"].visualize(arrow_origin, arrow_quaternion(policy_xy), policy_scale)
 
 
 def get_reset_metadata(terrain_height: float = 0.0) -> dict[str, Any]:

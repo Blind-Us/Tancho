@@ -72,10 +72,22 @@ class FixedEventCfg:
         },
     )
     push_robot = EventTerm(
-        func=mdp.push_by_setting_velocity,
+        func=ce.push_tancho_along_wheel_tangent,
         mode="interval",
         interval_range_s=(16.0, 16.0),
-        params={"velocity_range": {"x": (0.0, 0.0), "y": (0.0, 0.0)}},
+        params={
+            "velocity_range": {"x": (0.0, 0.0), "y": (0.0, 0.0)},
+            "push_probability": 0.5,
+        },
+    )
+
+
+@configclass
+class FixedPlayEventCfg(FixedEventCfg):
+    direction_markers = EventTerm(
+        func=ce.visualize_tancho_directions,
+        mode="interval",
+        interval_range_s=(0.05, 0.05),
     )
 
 
@@ -99,6 +111,9 @@ class TanchoV3FixedFlatSceneCfg(InteractiveSceneCfg):
             asset_path=FIXED_URDF_PATH,
             fix_base=False,
             merge_fixed_joints=True,
+            # Match the 6-DOF asset: fixed compound parts may overlap at their
+            # mechanical interfaces and must not generate internal contacts.
+            self_collision=False,
             joint_drive=None,
             activate_contact_sensors=True,
         ),
@@ -145,3 +160,19 @@ class TanchoV3FixedFlatEnvCfg(ManagerBasedRLEnvCfg):
         self.decimation = 2
         self.episode_length_s = 20.0
         self.sim.dt = 0.005
+
+
+@configclass
+class TanchoV3FixedFlatPlayEnvCfg(TanchoV3FixedFlatEnvCfg):
+    """Play-only fixed-leg config with push visualization enabled."""
+
+    curriculum: None = None
+    events: FixedPlayEventCfg = FixedPlayEventCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 1
+        self.events.push_robot.interval_range_s = (10.0, 10.0)
+        self.events.push_robot.params["velocity_range"] = {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}
+        self.events.push_robot.params["debug_vis"] = True
+        self.events.push_robot.params["push_probability"] = 1.0

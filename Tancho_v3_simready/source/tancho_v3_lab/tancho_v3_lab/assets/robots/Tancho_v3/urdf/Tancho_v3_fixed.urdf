@@ -24,48 +24,18 @@
         <mesh filename="meshes/base_link002.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="1.57079633 -0 0" />
-      <geometry>
-        <mesh filename="meshes/base_link.stl" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin xyz="0 0 0" rpy="1.57079633 -0 0" />
-      <geometry>
-        <mesh filename="meshes/base_link001.stl" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin xyz="0 0 0" rpy="1.57079633 -0 0" />
-      <geometry>
-        <mesh filename="meshes/base_link002.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="-0.01 -1.77132019972e-12 0.00055265617" rpy="1.57079633 -0 0" />
       <geometry>
         <mesh filename="meshes/drawer.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="-0.01 -1.77132019972e-12 0.00055265617" rpy="1.57079633 -0 0" />
-      <geometry>
-        <mesh filename="meshes/drawer.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="-0.01 -1.77132019972e-12 0.00055265617" rpy="1.57079633 -0 0" />
       <geometry>
         <mesh filename="meshes/pi_case.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="-0.01 -1.77132019972e-12 0.00055265617" rpy="1.57079633 -0 0" />
-      <geometry>
-        <mesh filename="meshes/pi_case.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="0.0192385743 0.0539953846982 0.000552656341061" rpy="1.57079633045 0.5 1.75095599751e-09" />
       <geometry>
@@ -84,24 +54,6 @@
         <mesh filename="meshes/knee_cover_L.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0.0192385743 0.0539953846982 0.000552656341061" rpy="1.57079633045 0.5 1.75095599751e-09" />
-      <geometry>
-        <mesh filename="meshes/joint_thigh_L.stl" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin xyz="0.0192385743 0.0539953846982 0.000552656341061" rpy="1.57079633045 0.5 1.75095599751e-09" />
-      <geometry>
-        <mesh filename="meshes/thigh_L.stl" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin xyz="0.0192385743 0.0539953846982 0.000552656341061" rpy="1.57079633045 0.5 1.75095599751e-09" />
-      <geometry>
-        <mesh filename="meshes/knee_cover_L.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="-0.0526752564908 0.0699953851201 -0.131084727891" rpy="1.57079633023 -0.37 -1.24314155937e-09" />
       <geometry>
@@ -114,18 +66,6 @@
         <mesh filename="meshes/calf_L.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="-0.0526752564908 0.0699953851201 -0.131084727891" rpy="1.57079633023 -0.37 -1.24314155937e-09" />
-      <geometry>
-        <mesh filename="meshes/joint_knee_L.stl" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin xyz="-0.0526752564908 0.0699953851201 -0.131084727891" rpy="1.57079633023 -0.37 -1.24314155937e-09" />
-      <geometry>
-        <mesh filename="meshes/calf_L.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="0.0192385743 -0.0539953847018 0.000552655994939" rpy="1.57079633045 0.5 1.75095599751e-09" />
       <geometry>
@@ -144,24 +84,6 @@
         <mesh filename="meshes/knee_cover_R.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0.0192385743 -0.0539953847018 0.000552655994939" rpy="1.57079633045 0.5 1.75095599751e-09" />
-      <geometry>
-        <mesh filename="meshes/joint_thigh_R.stl" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin xyz="0.0192385743 -0.0539953847018 0.000552655994939" rpy="1.57079633045 0.5 1.75095599751e-09" />
-      <geometry>
-        <mesh filename="meshes/thigh_R.stl" />
-      </geometry>
-    </collision>
-    <collision>
-      <origin xyz="0.0192385743 -0.0539953847018 0.000552655994939" rpy="1.57079633045 0.5 1.75095599751e-09" />
-      <geometry>
-        <mesh filename="meshes/knee_cover_R.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="-0.0526752564908 -0.0699953842799 -0.13108472834" rpy="1.57079633023 -0.37 -1.24314155937e-09" />
       <geometry>
@@ -174,18 +96,72 @@
         <mesh filename="meshes/calf_R.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="-0.0526752564908 -0.0699953842799 -0.13108472834" rpy="1.57079633023 -0.37 -1.24314155937e-09" />
+    <collision name="base_link_collision_box">
+      <origin xyz="0 2.98074621286e-13 -9.3e-05" rpy="1.57079633 -0 0" />
       <geometry>
-        <mesh filename="meshes/joint_knee_R.stl" />
+        <box size="0.18 0.091216 0.12" />
       </geometry>
     </collision>
-    <collision>
-      <origin xyz="-0.0526752564908 -0.0699953842799 -0.13108472834" rpy="1.57079633023 -0.37 -1.24314155937e-09" />
+    <collision name="drawer_collision_box">
+      <origin xyz="-0.032449 -9.78407883645e-12 0.00305265617" rpy="1.57079633 -0 0" />
       <geometry>
-        <mesh filename="meshes/calf_R.stl" />
+        <box size="0.141298 0.065 0.054994" />
       </geometry>
     </collision>
+    <collision name="pi_case_collision_box">
+      <origin xyz="0.0132 -1.54013734298e-10 0.04805265617" rpy="1.57079633 -0 0" />
+      <geometry>
+        <box size="0.1036 0.025 0.0656" />
+      </geometry>
+    </collision>
+    <collision name="thigh_L_collision_box">
+      <origin xyz="-0.0188802252003 0.082000384922 -0.0692149947024" rpy="1.57079633045 0.5 1.75095599751e-09" />
+      <geometry>
+        <box size="0.075988 0.216993 0.01" />
+      </geometry>
+    </collision>
+    <collision name="knee_cover_L_collision_cylinder">
+      <origin xyz="-0.0526752564906 0.0570003851205 -0.131084727933" rpy="1.57079633045 0.5 1.75095599751e-09" />
+      <geometry>
+        <cylinder radius="0.038" length="0.04" />
+      </geometry>
+    </collision>
+    <collision name="calf_L_collision_box">
+      <origin xyz="-0.0352848433083 0.0970003852625 -0.17555339905" rpy="1.57079633023 -0.37 -1.24314155937e-09" />
+      <geometry>
+        <box size="0.057265 0.152494 0.008" />
+      </geometry>
+    </collision>
+    <collision name="thigh_R_collision_box">
+      <origin xyz="-0.0188802252004 -0.082000384478 -0.0692149952281" rpy="1.57079633045 0.5 1.75095599751e-09" />
+      <geometry>
+        <box size="0.075988 0.216993 0.01" />
+      </geometry>
+    </collision>
+    <collision name="knee_cover_R_collision_cylinder">
+      <origin xyz="-0.0526752564906 -0.0570003842795 -0.131084728298" rpy="1.57079633045 0.5 1.75095599751e-09" />
+      <geometry>
+        <cylinder radius="0.038" length="0.04" />
+      </geometry>
+    </collision>
+    <collision name="calf_R_collision_box">
+      <origin xyz="-0.0352848433084 -0.0970003841375 -0.175553399672" rpy="1.57079633023 -0.37 -1.24314155937e-09" />
+      <geometry>
+        <box size="0.057265 0.152494 0.008" />
+      </geometry>
+    </collision>
+    <visual name="joint_wheel_L_stator_visual">
+      <origin xyz="-0.0165146038442 0.115500000719 -0.224315166263" rpy="-1.57079632695 -0.37 -1.24314155937e-09" />
+      <geometry>
+        <mesh filename="meshes/joint_wheel_L.stl" />
+      </geometry>
+    </visual>
+    <visual name="joint_wheel_R_stator_visual">
+      <origin xyz="-0.0165146038446 -0.115499999281 -0.224315167004" rpy="-1.57079632695 -0.37 -1.24314155937e-09" />
+      <geometry>
+        <mesh filename="meshes/joint_wheel_R.stl" />
+      </geometry>
+    </visual>
   </link>
   <link name="wheel_L">
     <inertial>
@@ -196,37 +172,19 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/joint_wheel_L.stl" />
-      </geometry>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/joint_wheel_L.stl" />
-      </geometry>
-    </collision>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
         <mesh filename="meshes/wheel_L.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/wheel_L.stl" />
-      </geometry>
-    </collision>
     <visual name="tpu_canonical_L_visual">
       <origin xyz="0 0 0.007" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/wheel_tpu.stl" />
       </geometry>
     </visual>
-    <collision name="tpu_canonical_L">
+    <collision name="wheel_L_round_tire_collision">
       <origin xyz="0 0 0.007" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/wheel_tpu.stl" />
+        <cylinder radius="0.03614" length="0.017" />
       </geometry>
     </collision>
   </link>
@@ -246,37 +204,19 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/joint_wheel_R.stl" />
-      </geometry>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/joint_wheel_R.stl" />
-      </geometry>
-    </collision>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
         <mesh filename="meshes/wheel_R.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/wheel_R.stl" />
-      </geometry>
-    </collision>
     <visual name="tpu_canonical_R_visual">
       <origin xyz="0 0 -0.007" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/wheel_tpu.stl" />
       </geometry>
     </visual>
-    <collision name="tpu_canonical_R">
+    <collision name="wheel_R_round_tire_collision">
       <origin xyz="0 0 -0.007" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/wheel_tpu.stl" />
+        <cylinder radius="0.03614" length="0.017" />
       </geometry>
     </collision>
   </link>

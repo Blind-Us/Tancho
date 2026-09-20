@@ -23,9 +23,15 @@ def register_environment(
 
 
 register_environment("TanchoV3-Flat-v0", "flat_env_cfg:TanchoV3FlatEnvCfg")
+register_environment("TanchoV3-Flat-Play-v0", "flat_env_cfg:TanchoV3FlatPlayEnvCfg")
 register_environment("TanchoV3-Rough-v0", "rough_env_cfg:TanchoV3RoughEnvCfg")
 register_environment(
     "TanchoV3-Fixed-Flat-v0",
     "fixed_flat_env_cfg:TanchoV3FixedFlatEnvCfg",
+    "TanchoV3FixedPPORunnerCfg",
+)
+register_environment(
+    "TanchoV3-Fixed-Flat-Play-v0",
+    "fixed_flat_env_cfg:TanchoV3FixedFlatPlayEnvCfg",
     "TanchoV3FixedPPORunnerCfg",
 )
