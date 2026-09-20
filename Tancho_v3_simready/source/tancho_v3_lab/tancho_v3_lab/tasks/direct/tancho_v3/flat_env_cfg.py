@@ -38,91 +38,58 @@ def make_flat_terrain() -> TerrainImporterCfg:
 
 @configclass
 class FlatRewardsCfg:
-    alive = RewardTerm(func=mdp.is_alive, weight=0.5)
-    termination_penalty = RewardTerm(func=mdp.is_terminated, weight=-350.0)
-    wheel_contact = RewardTerm(func=cr.wheel_ground_contact, weight=0.2, params={"sensor_cfg": SceneEntityCfg("contact_forces"), "threshold": 1.0})
-    tracking_lin_vel = RewardTerm(func=mdp.track_lin_vel_xy_exp, weight=0.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)})
-    tracking_ang_vel = RewardTerm(func=mdp.track_ang_vel_z_exp, weight=0.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)})
-    base_height = RewardTerm(
-        func=cr.base_height_l2_normalized,
-        weight=-5.0,#0.4
-        params={"target_height": BASE_HEIGHT_TARGET, "height_scale": 0.05},
-    )
+        # 1. 活著就給正獎勵
+        is_alive = RewardTerm(
+            func=mdp.is_alive,
+            weight=1.0,
+        )
 
-    mirror = RewardTerm(func=cr.mirror_leg_l2, weight=-0.7)
+        # 2. 機身保持直立
+        # θ -> 0
+        upright = RewardTerm(
+            func=mdp.flat_orientation_l2,
+            weight=-5.0,
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+            },
+        )
 
-    stable_standing = RewardTerm(
-        func=cr.stable_standing_bonus,
-        weight=15.0,#0.5
-        params={
-            "target_height": BASE_HEIGHT_TARGET,
-            # 擴大指數核的有效梯度範圍，不增加 reward weight。
-            "height_scale": 0.05,
-            "max_tilt_deg": 10.0,
-        },
-    )
+        # 3. 降低 pitch / roll angular velocity
+        # θ_dot -> 0
+        ang_vel = RewardTerm(
+            func=mdp.ang_vel_xy_l2,
+            weight=-0.5,
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+            },
+        )
 
-    flat_orientation = RewardTerm(func=mdp.flat_orientation_l2, weight=-10.0)#0.2
-    lin_vel_z = RewardTerm(func=mdp.lin_vel_z_l2, weight=-0.10)
-    ang_vel_xy = RewardTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    wheel_under_com = RewardTerm(func=cr.wheel_under_com_l2, weight=-0.05,#5e-3
-                                 params={"asset_cfg": SceneEntityCfg("robot"),
-                                         "left_wheel_body": "wheel_L",
-                                         "right_wheel_body": "wheel_R",
-                                         "com_body_name": None,
-                                         "error_scale": 0.015})
-    joint_deviation = RewardTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-0.5,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[
-                    "joint_thigh_L",
-                    "joint_calf_L",
-                    "joint_thigh_R",
-                    "joint_calf_R",
-                ],
-            ),
-        },
-    )
+        # 4. 降低水平移動速度
+        # x_dot -> 0
+        lin_vel = RewardTerm(
+            func=cr.lin_vel_xy_l2,
+            weight=-0.2,
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+            },
+        )
 
-    collision = RewardTerm(
-        func=mdp.undesired_contacts,
-        weight=-1.5,
-        params={
-            "threshold": 5.0,
-            "sensor_cfg": SceneEntityCfg(
-                "contact_forces",
-                body_names=[".*thigh.*", ".*calf.*"],
-            ),
-        },
-    )
+        # 5. wheel torque 不要長時間打滿
+        torque = RewardTerm(
+            func=mdp.joint_torques_l2,
+            weight=-1.0e-4,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=[
+                        "joint_wheel_L",
+                        "joint_wheel_R",
+                    ],
+                ),
+            },
+        )
 
-    # 我不知道啊
-    # dof_vel = RewardTerm(func=mdp.joint_vel_l2, weight=-2e-5)
-    # dof_acc = RewardTerm(func=mdp.joint_acc_l2, weight=-1e-7)
-    # torques = RewardTerm(func=mdp.joint_torques_l2, weight=-5e-5)
-    # action_rate = RewardTerm(func=mdp.action_rate_l2, weight=-0.005)
-    dof_pos_limits = RewardTerm(func=mdp.joint_pos_limits, weight=-5.0)
-    # dof_vel_limits = RewardTerm(func=mdp.joint_vel_limits, weight=-1.0, params={"soft_ratio": 0.9})
 
-    # coupled_survival = RewardTerm(
-    #     func=cr.coupled_survival_score,
-    #     weight=20.0,
-    #     params={
-    #         "target_height": BASE_HEIGHT_TARGET,
-    #         "height_scale": 0.05,
-    #         "asset_cfg_joint": SceneEntityCfg(
-    #             "robot",
-    #             joint_names=["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"],
-    #         ),
-    #         # 這裡的 scale 代表指數衰減的敏感度 (取原本權重的絕對值)
-    #         "scale_height": 5.0,       
-    #         "scale_orientation": 10.0, 
-    #         "scale_joint": 0.5,        
-    #     }
-    # )
 
 
 @configclass

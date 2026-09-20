@@ -28,15 +28,16 @@ from isaaclab.utils import configclass
 import isaaclab.envs.mdp as mdp
 
 from . import custom_rewards as cr
+from . import custom_events as ce
 
 ASSET_DIR = Path(__file__).resolve().parents[3] / "assets" / "robots" / "Tancho_v3"
 URDF_PATH = str(ASSET_DIR / "urdf" / "Tancho_v3.urdf")
 
 # -- 站姿參數 ---------------------------------------------------------------
-STAND_THIGH = -0.45
-STAND_CALF = 1.30
-RESPAWN_ROOT_HEIGHT = 0.26
-BASE_HEIGHT_TARGET = 0.20
+STAND_THIGH = ce.NOMINAL_JOINT_POSITIONS["joint_thigh_L"]
+STAND_CALF = ce.NOMINAL_JOINT_POSITIONS["joint_calf_L"]
+RESET_ROOT_HEIGHT = ce.TARGET_ROOT_HEIGHT_M
+BASE_HEIGHT_TARGET = 0.18
 IMU_POS_ROOT = (-0.00835741999, 0.0000000160456, -0.0294337942)
 IMU_ROT_ROOT = (0.707106781, 0.707106781, 0.0, 0.0)
 PPO_STEPS_PER_ITERATION = 24
@@ -70,7 +71,7 @@ class TanchoV3SceneCfg(InteractiveSceneCfg):
             activate_contact_sensors=True,
         ),
         init_state=ArticulationCfg.InitialStateCfg(
-            pos=(0.0, 0.0, RESPAWN_ROOT_HEIGHT),
+            pos=(0.0, 0.0, RESET_ROOT_HEIGHT),
             rot=(1.0, 0.0, 0.0, 0.0),
             joint_pos={
                 "joint_thigh_L": STAND_THIGH,
@@ -87,12 +88,12 @@ class TanchoV3SceneCfg(InteractiveSceneCfg):
             "legs": ImplicitActuatorCfg(
                 joint_names_expr=["joint_thigh_L", "joint_calf_L",
                                   "joint_thigh_R", "joint_calf_R"],
-                stiffness=30.0,#30.0
-                damping=1.0,#1.0
+                stiffness=100,
+                damping=2.0,
                 effort_limit_sim=12.5,
-                velocity_limit_sim=2,#20
+                velocity_limit_sim=12.5,
             ),
-            # 輪子 2 關節：MDP effort action；保留少量被動阻尼。
+            # 輪子 2 關節：MDP effort action
             "wheels": ImplicitActuatorCfg(
                 joint_names_expr=["joint_wheel_L", "joint_wheel_R"],
                 stiffness=0.0,
@@ -125,7 +126,7 @@ class ActionsCfg:
         joint_names=["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"],
         # 0.25 rad 無法在下沉前建立足夠的預載扭矩；放寬控制範圍，
         # 讓策略可主動伸腿支撐，而非只能等誤差變大後被動追趕。
-        scale=0.5,
+        scale=0.0,
         use_default_offset=True,
         preserve_order=True,
     )
@@ -186,8 +187,8 @@ class TerminationsCfg:
     base_contact = TerminationTermCfg(
     func=mdp.illegal_contact,
     params={
-        "sensor_cfg": SceneEntityCfg("contact_forces", body_names=['thigh_L','thigh_R',"calf_L","calf_R",]),
-        "threshold": 10.0,#10.0
+        "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["base_link_root"]),
+        "threshold": 10.0,
         },
     )
     
@@ -196,13 +197,13 @@ class TerminationsCfg:
         time_out=True,
     )
 
-    base_below_minimum_height = TerminationTermCfg(
-        func=cr.base_below_minimum_height,
-        params={
-            "minimum_height": 0.14,
-            "minimum_below_steps": 10,
-        },
-    )
+    # base_below_minimum_height = TerminationTermCfg(
+    #     func=cr.base_below_minimum_height,
+    #     params={
+    #         "minimum_height": 0.14,
+    #         "minimum_below_steps": 10,
+    #     },
+    # )
 
     bad_orientation = TerminationTermCfg(
         func=mdp.bad_orientation,
@@ -216,22 +217,14 @@ class TerminationsCfg:
 class EventCfg:
     """重置與 Domain Randomization。"""
 
-    reset_base = EventTerm(
-        func=mdp.reset_root_state_uniform,
+    reset_tancho_on_wheels = EventTerm(
+        func=ce.reset_tancho_on_wheels,
         mode="reset",
         params={
-            "pose_range": {"x": (-0.0, 0.0), "y": (-0.0, 0.0), "yaw": (-0.0, 0.0)},
-            "velocity_range": {},
-            "asset_cfg": SceneEntityCfg("robot"),
-        },
-    )
-    # 圍繞站姿小擾動 (default_joint_pos 來自 init_state)
-    reset_robot_joints = EventTerm(
-        func=mdp.reset_joints_by_offset,
-        mode="reset",
-        params={
-            "position_range": (0.0, 0.0),
-            "velocity_range": (0.0, 0.0),
+            # Flat terrain is world-Z=0. Rough/stairs variants can replace
+            # this scalar with ``terrain_height_fn`` without changing the FK
+            # or collision-derived support calculation.
+            "terrain_height": 0.0,
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
@@ -286,7 +279,7 @@ class CurriculumCfg:
             "modify_fn": cr.curriculum_enable_push,
             "modify_params": {
                 "num_steps": CURRICULUM_PUSH_ON_STEPS,
-                "velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)},
+                "velocity_range": {"x": (-0.5, 0.5), "y": (-0.0 ,0.0)},
             },
         },
     )

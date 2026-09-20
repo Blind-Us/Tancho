@@ -34,3 +34,10 @@ class TanchoV3PPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+
+
+@configclass
+class TanchoV3FixedPPORunnerCfg(TanchoV3PPORunnerCfg):
+    """Separate log namespace; PPO settings intentionally match the Flat baseline."""
+
+    experiment_name = "tancho_v3_fixed"

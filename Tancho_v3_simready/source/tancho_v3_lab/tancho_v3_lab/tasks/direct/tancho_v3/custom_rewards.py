@@ -6,6 +6,16 @@ from isaaclab.managers import SceneEntityCfg
 import isaaclab.envs.mdp as mdp
 
 
+def lin_vel_xy_l2(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Squared horizontal root velocity; compatibility equivalent of the removed MDP term."""
+
+    robot: Articulation = env.scene[asset_cfg.name]
+    return torch.sum(torch.square(robot.data.root_lin_vel_b[:, :2]), dim=1)
+
+
 # 雙輪接地  左右輪都有接觸地面時給分
 def wheel_ground_contact(
     env: ManagerBasedRLEnv,
@@ -247,32 +257,248 @@ def wheel_under_com_l2(
 
 
 
-
-def coupled_survival_score(
-    env: ManagerBasedRLEnv,
-    target_height: float,
-    height_scale: float,
-    asset_cfg_joint: SceneEntityCfg,
-    scale_height: float = 5.0,        # 沿用原 base_height 的 5.0
-    scale_orientation: float = 10.0,  # 沿用原 flat_orientation 的 10.0
-    scale_joint: float = 0.5,         # 沿用原 joint_deviation 的 0.5
+def wide_stance_reward(
+    env,
+    target_thigh: float,
+    target_calf: float,
+    sigma_thigh: float,
+    sigma_calf: float,
+    asset_cfg: SceneEntityCfg,
 ) -> torch.Tensor:
+    """Reward robot for staying inside a soft basin around the desired wide stance.
+
+    Expected joint ordering:
+        [
+            thigh_L,
+            calf_L,
+            thigh_R,
+            calf_R,
+        ]
+
+    Reward range:
+        0 ~ 1
+
+    At exact target:
+        reward = 1
+
+    Unlike a normal L1/L2 posture penalty, this reward saturates near the
+    desired pose. Once the robot is sufficiently close to the target posture,
+    there is very little incentive to use additional torque just to eliminate
+    a tiny position error.
     """
-    結合高度、傾斜與關節折疊的乘法門控生存獎勵。
-    直接調用原有函式的計算結果，並沿用原有的 weight 絕對值作為衰減超參數。
+
+    robot = env.scene[asset_cfg.name]
+
+    q = robot.data.joint_pos[:, asset_cfg.joint_ids]
+
+    target = torch.tensor(
+        [
+            target_thigh,
+            target_calf,
+            target_thigh,
+            target_calf,
+        ],
+        dtype=q.dtype,
+        device=q.device,
+    )
+
+    sigma = torch.tensor(
+        [
+            sigma_thigh,
+            sigma_calf,
+            sigma_thigh,
+            sigma_calf,
+        ],
+        dtype=q.dtype,
+        device=q.device,
+    )
+
+    # Normalized posture error
+    error = (q - target) / sigma
+
+    # Gaussian basin.
+    #
+    # exact target:
+    #     reward = 1
+    #
+    # one-sigma average error:
+    #     reward ~= exp(-1) ~= 0.37
+    #
+    # 避免 PPO 為了最後幾百分之一 rad 一直追加 torque。
+    error_sq = torch.mean(torch.square(error), dim=1)
+
+    reward = torch.exp(-error_sq)
+
+    return reward
+
+
+def joint_pd_torque_saturation(
+    env,
+    asset_cfg: SceneEntityCfg,
+    stiffness: float,
+    damping: float,
+    effort_limit: float,
+    soft_ratio: float = 0.75,
+) -> torch.Tensor:
+    """Penalize estimated implicit-PD torque demand near actuator saturation.
+
+    This is designed for ImplicitActuatorCfg.
+
+    Instead of penalizing all torque, estimate the torque requested by the
+    implicit PD controller:
+
+        tau_pd =
+            Kp * (q_target - q)
+            +
+            Kd * (qd_target - qd)
+
+    The penalty starts only when:
+
+        abs(tau_pd) / effort_limit > soft_ratio
+
+    Example with:
+        effort_limit = 12.5 Nm
+        soft_ratio   = 0.75
+
+    No penalty below:
+        9.375 Nm
+
+    Penalty progressively increases from:
+        9.375 Nm -> 12.5 Nm
+
+    Demand beyond the actuator limit receives an even larger penalty.
+
+    Return value:
+        >= 0
+
+    RewardTerm weight should therefore be negative.
     """
-    # 1. 取得原有函式的計算結果 (皆為正數的誤差/距離值)
-    res_height = base_height_l2_normalized(env, target_height=target_height, height_scale=height_scale)
-    res_tilt = mdp.flat_orientation_l2(env)
-    res_joint = mdp.joint_deviation_l1(env, asset_cfg=asset_cfg_joint)
-    
-    # 2. 轉換為 0.0 ~ 1.0 的健康度分數 (加上負號來產生指數衰減)
-    s_height = torch.exp(-scale_height * res_height)
-    s_tilt = torch.exp(-scale_orientation * res_tilt)
-    s_joint = torch.exp(-scale_joint * res_joint)
-    
-    # 3. 乘法門控連鎖
-    return s_height * s_tilt * s_joint
+
+    robot = env.scene[asset_cfg.name]
+
+    joint_ids = asset_cfg.joint_ids
+
+    # ------------------------------------------------------------------
+    # Current state
+    # ------------------------------------------------------------------
+
+    q = robot.data.joint_pos[:, joint_ids]
+    qd = robot.data.joint_vel[:, joint_ids]
+
+    # ------------------------------------------------------------------
+    # Controller targets
+    # ------------------------------------------------------------------
+
+    q_target_all = robot.data.joint_pos_target
+
+    if q_target_all is None:
+        # 理論上 position-controlled leg 不應該進這裡。
+        # 如果真的沒有 target，就不要製造假的 penalty。
+        return torch.zeros(
+            q.shape[0],
+            dtype=q.dtype,
+            device=q.device,
+        )
+
+    q_target = q_target_all[:, joint_ids]
+
+    qd_target_all = robot.data.joint_vel_target
+
+    if qd_target_all is None:
+        qd_target = torch.zeros_like(qd)
+    else:
+        qd_target = qd_target_all[:, joint_ids]
+
+    # ------------------------------------------------------------------
+    # Estimated raw PD demand
+    # ------------------------------------------------------------------
+    #
+    # 我們故意使用 clipping 前的 demand。
+    #
+    # 假設：
+    #
+    #   tau_pd = 18 Nm
+    #   limit  = 12.5 Nm
+    #
+    # 真正 actuator 最後只能給 12.5 Nm，
+    # 但 reward 必須知道 policy 正在要求 18 Nm。
+    # ------------------------------------------------------------------
+
+    position_error = q_target - q
+    velocity_error = qd_target - qd
+
+    tau_pd = (
+        stiffness * position_error
+        + damping * velocity_error
+    )
+
+    # ------------------------------------------------------------------
+    # Normalize torque demand
+    # ------------------------------------------------------------------
+
+    torque_ratio = torch.abs(tau_pd) / effort_limit
+
+    # Example:
+    #
+    # soft_ratio = 0.75
+    #
+    # ratio 0.50 -> 0
+    # ratio 0.75 -> 0
+    # ratio 0.875 -> 0.5
+    # ratio 1.00 -> 1
+    # ratio 1.25 -> 2
+    #
+    normalized_excess = (
+        torque_ratio - soft_ratio
+    ) / max(1.0 - soft_ratio, 1.0e-6)
+
+    normalized_excess = torch.clamp(
+        normalized_excess,
+        min=0.0,
+        max=3.0,
+    )
+
+    # Squared penalty.
+    #
+    # 75% torque -> 0
+    # 87.5%      -> 0.25
+    # 100%       -> 1
+    # 125%       -> 4
+    #
+    # 使用 mean 而不是 sum，
+    # 避免單純因為有四顆腿 joint 就把 reward scale 放大四倍。
+    penalty = torch.mean(
+        torch.square(normalized_excess),
+        dim=1,
+    )
+
+    return penalty
+
+def wheel_speed_soft_penalty(
+    env,
+    asset_cfg: SceneEntityCfg,
+    free_speed: float = 5.0,
+    soft_speed: float = 20.0,
+) -> torch.Tensor:
+    """輪速低於 free_speed 不扣分，超過後漸進懲罰。"""
+
+    robot = env.scene[asset_cfg.name]
+
+    qd = torch.abs(
+        robot.data.joint_vel[:, asset_cfg.joint_ids]
+    )
+
+    excess = (
+        qd - free_speed
+    ) / max(soft_speed - free_speed, 1.0e-6)
+
+    excess = torch.clamp(
+        excess,
+        min=0.0,
+        max=3.0,
+    )
+
+    return torch.mean(excess**2, dim=1)
 
 
 

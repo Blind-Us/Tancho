@@ -47,12 +47,15 @@ def main():
     contact_sensor = unwrapped.scene.sensors["contact_forces"]
     root_body_ids, _ = contact_sensor.find_bodies("base_link_root")
     wheel_body_ids, _ = contact_sensor.find_bodies(".*wheel.*")
-    thigh_body_ids, _ = contact_sensor.find_bodies(".*thigh.*")
-    calf_body_ids, _ = contact_sensor.find_bodies(".*calf.*")
-    joint_pos_term = unwrapped.action_manager.get_term("joint_pos")
+    thigh_body_ids = [index for index, name in enumerate(contact_sensor.body_names) if "thigh" in name]
+    calf_body_ids = [index for index, name in enumerate(contact_sensor.body_names) if "calf" in name]
+    action_terms = {
+        name: unwrapped.action_manager.get_term(name)
+        for name in unwrapped.action_manager.active_terms
+    }
     print(
         "ZERO_AGENT_ACTION_MAP "
-        f"robot_joint_names={robot.joint_names} joint_ids={joint_pos_term._joint_ids} "
+        f"robot_joint_names={robot.joint_names} action_terms={list(action_terms)} "
         f"default_joint_pos={robot.data.default_joint_pos[0].tolist()}",
         flush=True,
     )
@@ -87,7 +90,11 @@ def main():
 
         if control_steps == 0:
             print(
-                f"ZERO_AGENT_PROCESSED_TARGET joint_pos={joint_pos_term.processed_actions[0].tolist()}",
+                "ZERO_AGENT_PROCESSED_ACTIONS "
+                + " ".join(
+                    f"{name}={term.processed_actions[0].tolist()}"
+                    for name, term in action_terms.items()
+                ),
                 flush=True,
             )
 

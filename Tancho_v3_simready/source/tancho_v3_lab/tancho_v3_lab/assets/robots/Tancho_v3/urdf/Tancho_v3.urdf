@@ -3,9 +3,9 @@
   <link name="base_link_root" />
   <link name="base_link">
     <inertial>
-      <origin xyz="0.0011187875 0.00127367658 -1.70173615e-08" rpy="0 0 0" />
-      <mass value="0.348" />
-      <inertia ixx="0.000593043538" iyy="0.00111124105" izz="0.000996417014" ixy="-3.01447428e-06" ixz="2.6335003e-10" iyz="1.92376359e-09" />
+      <origin xyz="0.0179204661706 0.000109824559442 2.08081932425e-09" rpy="0 0 0" />
+      <mass value="0.9469" />
+      <inertia ixx="0.00249861388114" iyy="0.00310346667925" izz="0.00124127386737" ixy="-5.61324952424e-06" ixz="7.43404173636e-10" iyz="-8.59455252427e-10" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -46,9 +46,9 @@
   </link>
   <link name="drawer">
     <inertial>
-      <origin xyz="-0.0211872329 -0.00792307398 1.62167735e-08" rpy="0 0 0" />
+      <origin xyz="-0.0211872168247 -0.00792307377157 -6.21976139872e-09" rpy="0 0 0" />
       <mass value="0.4" />
-      <inertia ixx="0.000138603081" iyy="0.000681290964" izz="0.000678129249" ixy="3.77968725e-05" ixz="3.49798101e-10" iyz="-1.01244165e-10" />
+      <inertia ixx="0.000138603282848" iyy="0.000681290559639" izz="0.000678127542689" ixy="3.77968643799e-05" ixz="-1.65567643608e-10" iyz="4.13589725619e-11" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -65,9 +65,9 @@
   </link>
   <link name="pi_case">
     <inertial>
-      <origin xyz="0.0233176478 0.0504234963 2.16819542e-07" rpy="0 0 0" />
+      <origin xyz="0.0206489956437 0.0472586114413 0" rpy="0 0 0" />
       <mass value="0.146" />
-      <inertia ixx="5.63737974e-05" iyy="0.000172248568" izz="0.000125194055" ixy="5.67823474e-06" ixz="4.78640645e-10" iyz="1.98975908e-10" />
+      <inertia ixx="5.8957089466e-05" iyy="0.000168835776752" izz="0.00012512575244" ixy="1.51656238177e-06" ixz="0" iyz="0" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -84,9 +84,9 @@
   </link>
   <link name="thigh_L">
     <inertial>
-      <origin xyz="-0.000408445945 -0.0229151318 -0.00280925304" rpy="0 0 0" />
-      <mass value="0.379" />
-      <inertia ixx="0.0011933124" iyy="0.000180923701" izz="0.00119950751" ixy="-9.84386411e-06" ixz="-3.90023267e-06" iyz="-4.78810371e-05" />
+      <origin xyz="-0.000430850038518 -0.1411905826 -0.0155840289572" rpy="0 0 0" />
+      <mass value="0.3805" />
+      <inertia ixx="0.000547131943882" iyy="0.000170572332425" izz="0.000564871911117" ixy="8.96495900583e-06" ixz="-2.03616769105e-06" iyz="4.0349953072e-05" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -127,9 +127,9 @@
   </link>
   <link name="calf_L">
     <inertial>
-      <origin xyz="0.000188809828 -0.00516026443 -0.00324688923" rpy="0 0 0" />
-      <mass value="0.150" />
-      <inertia ixx="0.000273664582" iyy="0.000148954531" izz="0.000263786338" ixy="2.84340912e-06" ixz="1.52962103e-06" iyz="-4.18052867e-05" />
+      <origin xyz="0.000327897313435 -0.0880790567764 -0.0416417066914" rpy="0 0 0" />
+      <mass value="0.1499" />
+      <inertia ixx="0.000161772046331" iyy="3.65983874212e-05" izz="0.000164471627648" ixy="-1.90490805529e-06" ixz="-7.1943943846e-07" iyz="-2.61503380586e-05" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -158,9 +158,9 @@
   </link>
   <link name="wheel_L">
     <inertial>
-      <origin xyz="4.74095232e-11 5.83255949e-07 0.00192447727" rpy="0 0 0" />
-      <mass value="0.035" />
-      <inertia ixx="3.78602142e-05" iyy="3.7860214e-05" izz="5.35967391e-05" ixy="-2.30837502e-16" ixz="-8.13345963e-14" iyz="-5.49762767e-10" />
+      <origin xyz="-4.14921295967e-08 2.51191629429e-06 0.00812680099336" rpy="0 0 0" />
+      <mass value="0.0349" />
+      <inertia ixx="1.46620752425e-05" iyy="1.46620962008e-05" izz="2.71552006104e-05" ixy="4.11113169653e-11" ixz="-8.2528265269e-14" iyz="3.13847671388e-13" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -186,24 +186,24 @@
         <mesh filename="meshes/wheel_L.stl" />
       </geometry>
     </collision>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+    <visual name="tpu_canonical_L_visual">
+      <origin xyz="0 0 0.007" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/wheel_L001.stl" />
+        <mesh filename="meshes/wheel_tpu.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+    <collision name="tpu_canonical_L">
+      <origin xyz="0 0 0.007" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/wheel_L001.stl" />
+        <mesh filename="meshes/wheel_tpu.stl" />
       </geometry>
     </collision>
   </link>
   <link name="thigh_R">
     <inertial>
-      <origin xyz="-0.00040844648 -0.0229151208 0.00280925412" rpy="0 0 0" />
-      <mass value="0.379" />
-      <inertia ixx="0.00119331189" iyy="0.000180923737" izz="0.00119950696" ixy="-9.84387862e-06" ixz="3.90023762e-06" iyz="4.7880986e-05" />
+      <origin xyz="-0.000430844565762 -0.14119058257 0.0155840292724" rpy="0 0 0" />
+      <mass value="0.3805" />
+      <inertia ixx="0.000547131828033" iyy="0.000170572362298" izz="0.000564871852934" ixy="8.96496118358e-06" ixz="2.0361949079e-06" iyz="-4.03499404923e-05" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -244,9 +244,9 @@
   </link>
   <link name="calf_R">
     <inertial>
-      <origin xyz="0.000188809828 -0.00516026443 0.00324688923" rpy="0 0 0" />
-      <mass value="0.150" />
-      <inertia ixx="0.000273664582" iyy="0.000148954531" izz="0.000263786338" ixy="2.84340912e-06" ixz="-1.52962103e-06" iyz="4.18052867e-05" />
+      <origin xyz="0.000327897313059 -0.0880790567765 0.0416417066906" rpy="0 0 0" />
+      <mass value="0.1499" />
+      <inertia ixx="0.00016177204633" iyy="3.65983874203e-05" izz="0.000164471627648" ixy="-1.90490805597e-06" ixz="7.19439438637e-07" iyz="2.61503380572e-05" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -275,9 +275,9 @@
   </link>
   <link name="wheel_R">
     <inertial>
-      <origin xyz="2.1907452e-11 5.83325029e-07 -0.00192447731" rpy="0 0 0" />
-      <mass value="0.035" />
-      <inertia ixx="3.78602143e-05" iyy="3.78602141e-05" izz="5.35967391e-05" ixy="1.66490752e-16" ixz="1.49207184e-14" iyz="5.49859042e-10" />
+      <origin xyz="4.21764856755e-08 2.42604545832e-06 -0.00812679416159" rpy="0 0 0" />
+      <mass value="0.0349" />
+      <inertia ixx="1.46620431828e-05" iyy="1.4662064142e-05" izz="2.71551352832e-05" ixy="-3.82388501131e-11" ixz="-2.21847656366e-13" iyz="-6.82365049493e-14" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -303,16 +303,18 @@
         <mesh filename="meshes/wheel_R.stl" />
       </geometry>
     </collision>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+    <visual name="tpu_canonical_R_visual">
+      <origin xyz="0 0 -0.007" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/wheel_R001.stl" />
+        <mesh filename="meshes/wheel_tpu.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+    <collision name="tpu_canonical_R">
+      <!-- Same axis-centred TPU mesh as the left wheel, installed at the
+           mirrored axial offset of the original CAD assembly. -->
+      <origin xyz="0 0 -0.007" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/wheel_R001.stl" />
+        <mesh filename="meshes/wheel_tpu.stl" />
       </geometry>
     </collision>
   </link>

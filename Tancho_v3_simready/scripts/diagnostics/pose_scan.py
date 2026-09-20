@@ -10,6 +10,9 @@ parser.add_argument("--max_steps", type=int, default=600)
 parser.add_argument("--leg_stiffness", type=float, default=None)
 parser.add_argument("--leg_damping", type=float, default=None)
 parser.add_argument("--leg_effort", type=float, default=None)
+parser.add_argument("--respawn_height", type=float, default=None)
+parser.add_argument("--initial_thigh", type=float, default=None)
+parser.add_argument("--initial_calf", type=float, default=None)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -36,6 +39,15 @@ def main():
         env_cfg.scene.robot.actuators["legs"].damping = args_cli.leg_damping
     if args_cli.leg_effort is not None:
         env_cfg.scene.robot.actuators["legs"].effort_limit_sim = args_cli.leg_effort
+    if args_cli.respawn_height is not None:
+        x, y, _ = env_cfg.scene.robot.init_state.pos
+        env_cfg.scene.robot.init_state.pos = (x, y, args_cli.respawn_height)
+    if args_cli.initial_thigh is not None:
+        env_cfg.scene.robot.init_state.joint_pos["joint_thigh_L"] = args_cli.initial_thigh
+        env_cfg.scene.robot.init_state.joint_pos["joint_thigh_R"] = args_cli.initial_thigh
+    if args_cli.initial_calf is not None:
+        env_cfg.scene.robot.init_state.joint_pos["joint_calf_L"] = args_cli.initial_calf
+        env_cfg.scene.robot.init_state.joint_pos["joint_calf_R"] = args_cli.initial_calf
     env = gym.make(args_cli.task, cfg=env_cfg)
     env.reset()
     unwrapped = env.unwrapped
@@ -52,22 +64,27 @@ def main():
         f"term_joint_ids={joint_pos_term._joint_ids}",
         flush=True,
     )
-    # JointPositionActionCfg resolves the requested names to articulation order:
-    # L thigh, R thigh, L calf, R calf.
+    # Use the action term's resolved joint order, not the articulation's order.
     thigh_action = (thigh_targets - float(env_cfg.scene.robot.init_state.joint_pos["joint_thigh_L"])) / float(
         env_cfg.actions.joint_pos.scale
     )
     calf_action = (calf_targets - float(env_cfg.scene.robot.init_state.joint_pos["joint_calf_L"])) / float(
         env_cfg.actions.joint_pos.scale
     )
+    first_episode_height_sum = torch.zeros_like(height_sum)
+    first_episode_samples = torch.zeros_like(episode_steps)
+    first_episode_done = torch.zeros_like(completed, dtype=torch.bool)
     for _ in range(args_cli.max_steps):
         actions = torch.zeros(env.action_space.shape, device=unwrapped.device)
-        actions[:, 0] = thigh_action
-        actions[:, 1] = thigh_action
-        actions[:, 2] = calf_action
-        actions[:, 3] = calf_action
+        for action_index, joint_id in enumerate(joint_pos_term._joint_ids):
+            joint_name = unwrapped.scene["robot"].joint_names[joint_id]
+            actions[:, action_index] = thigh_action if "thigh" in joint_name else calf_action
         height_sum += unwrapped.scene["robot"].data.root_pos_w[:, 2]
         height_samples += 1
+        first_episode_height_sum += torch.where(
+            first_episode_done, 0.0, unwrapped.scene["robot"].data.root_pos_w[:, 2]
+        )
+        first_episode_samples += (~first_episode_done).long()
         with torch.inference_mode():
             _, _, terminated, truncated, _ = env.step(actions)
         episode_steps += 1
@@ -75,16 +92,19 @@ def main():
         step_sum[done] += episode_steps[done]
         max_survival[done] = torch.maximum(max_survival[done], episode_steps[done])
         completed[done] += 1
+        first_episode_done |= done
         episode_steps[done] = 0
 
     max_survival = torch.maximum(max_survival, episode_steps)
     for i, (thigh, calf) in enumerate(zip(thigh_targets.tolist(), calf_targets.tolist())):
         mean = float(step_sum[i]) / int(completed[i]) if completed[i] else float(episode_steps[i])
         mean_height = float(height_sum[i] / height_samples[i])
+        first_mean_height = float(first_episode_height_sum[i] / first_episode_samples[i])
         print(
             f"POSE_SCAN thigh={thigh:.3f} calf={calf:.3f} completed={int(completed[i])} "
             f"mean_steps={mean:.2f} max_steps={int(max_survival[i])} "
-            f"seconds={mean * float(unwrapped.step_dt):.3f} mean_height={mean_height:.4f}",
+            f"seconds={mean * float(unwrapped.step_dt):.3f} mean_height={mean_height:.4f} "
+            f"first_mean_height={first_mean_height:.4f}",
             flush=True,
         )
     env.close()
