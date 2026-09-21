@@ -51,7 +51,7 @@ class FlatRewardsCfg:
         )
 
         # 2. 機身保持直立
-        # θ -> 0
+        # theta -> 0
         upright = RewardTerm(
             func=mdp.flat_orientation_l2,
             weight=-5.0,
@@ -61,7 +61,7 @@ class FlatRewardsCfg:
         )
 
         # 3. 降低 pitch / roll angular velocity
-        # θ_dot -> 0
+        # theta_dot -> 0
         ang_vel = RewardTerm(
             func=mdp.ang_vel_xy_l2,
             weight=-0.5,
@@ -70,26 +70,40 @@ class FlatRewardsCfg:
             },
         )
 
-        # 4. 抑制繞垂直軸原地旋轉（yaw rate / ang_z）
+        # 4. 追蹤零 yaw-rate，避免左右輪輸出不一致造成原地打轉
         ang_vel_z = RewardTerm(
-            func=cr.ang_vel_z_l2,
-            weight=-0.5,
+            func=mdp.track_ang_vel_z_exp,
+            weight=0.5,
             params={
-                "asset_cfg": SceneEntityCfg("robot"),
+                "command_name": "base_velocity",
+                "std": math.sqrt(0.25),
             },
         )
 
-        # 5. 降低水平移動速度
-        # x_dot -> 0
+        # 5. 追蹤零水平速度，讓平衡後仍持續滾動的機器人回到靜止
         lin_vel = RewardTerm(
-            func=cr.lin_vel_xy_l2,
-            weight=-0.5,
+            func=mdp.track_lin_vel_xy_exp,
+            weight=0.5,
             params={
-                "asset_cfg": SceneEntityCfg("robot"),
+                "command_name": "base_velocity",
+                "std": math.sqrt(0.25),
             },
         )
 
-        # 6. wheel torque 不要長時間打滿
+        # 6. 官方 MDP 無 whole-body COM 到輪軸線距離，保留 Tancho 自訂項目
+        wheel_under_com = RewardTerm(
+            func=cr.wheel_under_com_l2,
+            weight=-0.02,
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+                "left_wheel_body": "wheel_L",
+                "right_wheel_body": "wheel_R",
+                "com_body_name": None,
+                "error_scale": 0.015,
+            },
+        )
+
+        # 7. wheel torque 不要長時間打滿
         torque = RewardTerm(
             func=mdp.joint_torques_l2,
             weight=-1.0e-4,
@@ -103,6 +117,41 @@ class FlatRewardsCfg:
                 ),
             },
         )
+
+        # 8. leg torque 不要長時間打滿 12.5 Nm
+        leg_torque = RewardTerm(
+            func=mdp.joint_torques_l2,
+            weight=-1.0e-4,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=[
+                        "joint_thigh_L",
+                        "joint_calf_L",
+                        "joint_thigh_R",
+                        "joint_calf_R",
+                    ],
+                ),
+            },
+        )
+
+        # 9. 抑制相鄰 control step 的動作跳變，避免 reset 後立即跳到大角度目標。
+        action_rate = RewardTerm(
+            func=mdp.action_rate_l2,
+            weight=-1.0e-3,
+        )
+
+        # 10. 防止機身保持水平卻整體下蹲到觸地。
+        # Flat terrain 目標高度來自 Gate B 的 nominal wheel-ground reset geometry。
+        base_height = RewardTerm(
+            func=mdp.base_height_l2,
+            weight=-100.0,
+            params={
+                "target_height": BASE_HEIGHT_TARGET,
+                "asset_cfg": SceneEntityCfg("robot"),
+            },
+        )
+
 
 
 

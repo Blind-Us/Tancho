@@ -1,7 +1,10 @@
 """Script to play a trained RSL-RL policy."""
 
 import argparse
+import csv
+from datetime import datetime
 import os
+from pathlib import Path
 import sys
 
 from isaaclab.app import AppLauncher
@@ -19,6 +22,23 @@ parser.add_argument(
     help="Checkpoint filename regex under logs, or a direct path to a .pt file.",
 )
 parser.add_argument("--num_steps", type=int, default=500, help="Number of inference steps to simulate.")
+parser.add_argument(
+    "--trace_duration_s",
+    type=float,
+    default=0.15,
+    help="Record detailed post-step support diagnostics for this long after each reset.",
+)
+parser.add_argument(
+    "--trace_csv",
+    type=str,
+    default=None,
+    help="Detailed trace CSV path. Defaults to logs/diagnostics/play_support_<timestamp>.csv.",
+)
+parser.add_argument(
+    "--use_policy",
+    action="store_true",
+    help="Run the loaded policy instead of the legacy zero-action physics diagnostic.",
+)
 parser.add_argument("--leg_stiffness", type=float, default=None, help="Diagnostic override for leg actuator stiffness.")
 parser.add_argument("--leg_damping", type=float, default=None, help="Diagnostic override for leg actuator damping.")
 parser.add_argument("--leg_effort", type=float, default=None, help="Diagnostic override for leg actuator effort limit.")
@@ -484,6 +504,95 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         except Exception:
             return 0.0
 
+    def _contact_force_z(ids):
+        """Sum world-Z contact force, i.e. the wheel support/normal component."""
+
+        if contact_sensor is None or len(ids) == 0:
+            return 0.0
+        try:
+            return contact_sensor.data.net_forces_w[0, ids, 2].sum().item()
+        except Exception:
+            return 0.0
+
+    trace_path = (
+        Path(args_cli.trace_csv).expanduser().resolve()
+        if args_cli.trace_csv
+        else Path("logs/diagnostics")
+        / f"play_support_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    )
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    trace_file = trace_path.open("w", newline="", encoding="utf-8")
+    trace_fields = [
+        "episode_index",
+        "episode_step",
+        "time_s",
+        "done",
+        "gravity_compensation_fraction",
+        "effective_gravity_fraction",
+        "root_z_m",
+        "root_vz_m_s",
+        "wheel_L_normal_force_z_n",
+        "wheel_R_normal_force_z_n",
+    ]
+    leg_joint_records = (
+        ("thigh_L", thigh_l_id),
+        ("calf_L", calf_l_id),
+        ("thigh_R", thigh_r_id),
+        ("calf_R", calf_r_id),
+    )
+    for joint_name, _ in leg_joint_records:
+        trace_fields.extend(
+            [
+                f"{joint_name}_q_rad",
+                f"{joint_name}_target_q_rad",
+                f"{joint_name}_qd_rad_s",
+                f"{joint_name}_computed_torque_nm",
+                f"{joint_name}_applied_torque_nm",
+            ]
+        )
+    trace_writer = csv.DictWriter(trace_file, fieldnames=trace_fields)
+    trace_writer.writeheader()
+    print(f"[DIAG] support trace CSV = {trace_path}")
+
+    episode_index = 0
+
+    def _write_trace(done: bool):
+        episode_step = int(unwrapped.episode_length_buf[0].item())
+        time_s = episode_step * float(unwrapped.step_dt)
+        if time_s > args_cli.trace_duration_s + 1.0e-12:
+            return
+
+        q = robot.data.joint_pos[0]
+        qt = robot.data.joint_pos_target[0]
+        qd = robot.data.joint_vel[0]
+        applied = robot.data.applied_torque[0]
+        computed_all = getattr(robot.data, "computed_torque", None)
+        computed = computed_all[0] if computed_all is not None else applied
+        gravity_fraction_state = getattr(unwrapped, "tancho_gravity_ramp_fraction", None)
+        compensation = (
+            float(gravity_fraction_state[0].item()) if gravity_fraction_state is not None else 0.0
+        )
+        row = {
+            "episode_index": episode_index,
+            "episode_step": episode_step,
+            "time_s": time_s,
+            "done": int(done),
+            "gravity_compensation_fraction": compensation,
+            "effective_gravity_fraction": 1.0 - compensation,
+            "root_z_m": robot.data.root_pos_w[0, 2].item(),
+            "root_vz_m_s": robot.data.root_lin_vel_w[0, 2].item(),
+            "wheel_L_normal_force_z_n": _contact_force_z(contact_ids["wheelL"]),
+            "wheel_R_normal_force_z_n": _contact_force_z(contact_ids["wheelR"]),
+        }
+        for joint_name, joint_id in leg_joint_records:
+            row[f"{joint_name}_q_rad"] = q[joint_id].item()
+            row[f"{joint_name}_target_q_rad"] = qt[joint_id].item()
+            row[f"{joint_name}_qd_rad_s"] = qd[joint_id].item()
+            row[f"{joint_name}_computed_torque_nm"] = computed[joint_id].item()
+            row[f"{joint_name}_applied_torque_nm"] = applied[joint_id].item()
+        trace_writer.writerow(row)
+        trace_file.flush()
+
     def _print_state(tag, done=False):
         q = robot.data.joint_pos[0]
         qt = robot.data.joint_pos_target[0]
@@ -528,6 +637,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # Print the state before the first physics step.
     _print_state("[INIT ]", done=False)
+    _write_trace(done=False)
 
     with torch.inference_mode():
         while simulation_app.is_running():
@@ -538,15 +648,23 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             pre_root_z = robot.data.root_pos_w[0, 2].item()
             pre_root_vz = robot.data.root_lin_vel_w[0, 2].item()
 
-            # TEST: do not use the policy; hold the default joint target.
-            actions = torch.zeros(
-                (wrapped_env.num_envs, wrapped_env.num_actions),
-                device=wrapped_env.device,
-            )
+            if args_cli.use_policy:
+                actions = policy(obs)
+            else:
+                # Legacy physics diagnostic: hold the default joint target.
+                actions = torch.zeros(
+                    (wrapped_env.num_envs, wrapped_env.num_actions),
+                    device=wrapped_env.device,
+                )
 
             step_result = wrapped_env.step(actions)
             obs = step_result[0]
             done = bool(wrapped_env.reset_buf[0].item())
+            if done:
+                # Manager-based environments auto-reset inside step(); the
+                # state visible here is formal t=0 of the next episode.
+                episode_index += 1
+            _write_trace(done=done)
 
             # Print much more frequently than before.  The current robot usually
             # terminates around ~53 steps, so every 5 steps shows the onset clearly.
@@ -565,6 +683,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
             if args_cli.num_steps > 0 and steps >= args_cli.num_steps:
                 break
+
+    trace_file.close()
 
 
 if __name__ == "__main__":

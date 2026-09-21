@@ -603,6 +603,45 @@ def _resolve_terrain_height(
     return heights
 
 
+def _set_gravity_compensation_fraction(
+    env: Any,
+    asset: Any,
+    env_ids: Any,
+    gravity_fraction: Any,
+) -> None:
+    """Write per-body gravity compensation through Isaac Lab's wrench composer."""
+
+    import torch
+
+    env_ids = torch.as_tensor(env_ids, device=asset.device, dtype=torch.long).reshape(-1)
+    mass_cache_name = "_tancho_gravity_ramp_body_mass"
+    all_body_mass = getattr(env, mass_cache_name, None)
+    if all_body_mass is None or all_body_mass.device != asset.device:
+        all_body_mass = asset.data.default_mass.to(device=asset.device)
+        setattr(env, mass_cache_name, all_body_mass)
+    body_mass = all_body_mass[env_ids]
+    fraction = torch.as_tensor(gravity_fraction, device=asset.device, dtype=body_mass.dtype).reshape(-1)
+    if fraction.numel() == 1:
+        fraction = fraction.expand(len(env_ids))
+
+    gravity_w = torch.as_tensor(env.sim.cfg.gravity, device=asset.device, dtype=body_mass.dtype)
+    forces_w = -body_mass.unsqueeze(-1) * gravity_w.view(1, 1, 3)
+    forces_w *= fraction.view(-1, 1, 1)
+    asset.permanent_wrench_composer.set_forces_and_torques(
+        forces=forces_w,
+        torques=torch.zeros_like(forces_w),
+        body_ids=None,
+        env_ids=env_ids,
+        is_global=True,
+    )
+
+    if not hasattr(env, "tancho_gravity_ramp_fraction"):
+        env.tancho_gravity_ramp_fraction = torch.zeros(
+            asset.num_instances, device=asset.device, dtype=body_mass.dtype
+        )
+    env.tancho_gravity_ramp_fraction[env_ids] = fraction
+
+
 def reset_tancho_on_wheels(
     env: Any,
     env_ids: Any,
@@ -714,6 +753,14 @@ def reset_tancho_on_wheels(
         asset.write_root_velocity_to_sim(root_velocity, env_ids=env_ids)
     asset.write_joint_state_to_sim(joint_pos, joint_vel, joint_ids=slice(None), env_ids=env_ids)
 
+    # A state teleport does not reset the actuator command buffers.  Keep the
+    # implicit-PD targets coherent with the teleported nominal pose before the
+    # next physics substep; otherwise a stale target (commonly all zeros on
+    # the first episode) can request peak torque for one contact step.
+    asset.set_joint_position_target(joint_pos, joint_ids=slice(None), env_ids=env_ids)
+    asset.set_joint_velocity_target(joint_vel, joint_ids=slice(None), env_ids=env_ids)
+    asset.set_joint_effort_target(torch.zeros_like(joint_pos), joint_ids=slice(None), env_ids=env_ids)
+
     wheel_gaps = torch.as_tensor(geometry.wheel_gap_m, device=device, dtype=joint_dtype)
     metadata = {
         **metadata_source,
@@ -726,6 +773,33 @@ def reset_tancho_on_wheels(
     # on the environment object for diagnostics that inspect post-reset state.
     env.tancho_reset_metadata = metadata
 
+    # The initial interval event runs only after the first policy step.  Arm
+    # full compensation now so initial construction and later resets match.
+    _set_gravity_compensation_fraction(env, asset, env_ids, 1.0)
+
+
+def apply_reset_gravity_ramp(
+    env: Any,
+    env_ids: Any,
+    duration_s: float = 0.20,
+    asset_cfg: Any = None,
+) -> None:
+    """Fade per-body gravity compensation from 100% to zero after reset."""
+
+    import torch
+
+    if duration_s <= 0.0:
+        raise ValueError("duration_s must be positive")
+    asset_name = "robot" if asset_cfg is None else asset_cfg.name
+    asset = env.scene[asset_name]
+    env_ids = torch.as_tensor(env_ids, device=asset.device, dtype=torch.long).reshape(-1)
+    if len(env_ids) == 0:
+        return
+
+    elapsed_s = env.episode_length_buf[env_ids].to(dtype=asset.data.default_mass.dtype) * env.step_dt
+    phase = torch.clamp(elapsed_s / duration_s, min=0.0, max=1.0)
+    gravity_fraction = 1.0 - (3.0 * phase.square() - 2.0 * phase.pow(3))
+    _set_gravity_compensation_fraction(env, asset, env_ids, gravity_fraction)
 
 def prepare_tancho_measurement_start(
     env: Any,

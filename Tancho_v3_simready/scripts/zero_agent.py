@@ -8,6 +8,13 @@ parser.add_argument("--num_envs", type=int, default=None)
 parser.add_argument("--task", type=str, default=None)
 parser.add_argument("--seed", type=int, default=None)
 parser.add_argument("--constant_action", type=float, default=0.0)
+parser.add_argument("--gravity_off", action="store_true", help="Disable gravity for startup isolation diagnostics.")
+parser.add_argument(
+    "--root_height_offset",
+    type=float,
+    default=0.0,
+    help="Raise the reset support plane by this amount while leaving the physical ground at z=0.",
+)
 parser.add_argument("--max_steps", type=int, default=0, help="Stop after this many control steps; 0 runs forever.")
 parser.add_argument(
     "--fail_mean_episode_steps",
@@ -40,6 +47,10 @@ def main():
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
     env_cfg.seed = args_cli.seed
+    if args_cli.gravity_off:
+        env_cfg.sim.gravity = (0.0, 0.0, 0.0)
+    if args_cli.root_height_offset:
+        env_cfg.events.reset_tancho_on_wheels.params["terrain_height"] = args_cli.root_height_offset
     env = gym.make(args_cli.task, cfg=env_cfg)
     env.reset()
     unwrapped = env.unwrapped
@@ -57,6 +68,20 @@ def main():
         "ZERO_AGENT_ACTION_MAP "
         f"robot_joint_names={robot.joint_names} action_terms={list(action_terms)} "
         f"default_joint_pos={robot.data.default_joint_pos[0].tolist()}",
+        flush=True,
+    )
+    body_mass = robot.data.default_mass.to(device=robot.device, dtype=robot.data.body_com_pos_w.dtype)
+    whole_com_w = (robot.data.body_com_pos_w * body_mass.unsqueeze(-1)).sum(dim=1) / body_mass.sum(
+        dim=1, keepdim=True
+    )
+    robot_wheel_ids, _ = robot.find_bodies(["wheel_L", "wheel_R"], preserve_order=True)
+    wheel_axle_mid_w = robot.data.body_pos_w[:, robot_wheel_ids, :].mean(dim=1)
+    print(
+        "ZERO_AGENT_MASS_COM "
+        f"total_mass_kg={float(body_mass[0].sum()):.6f} "
+        f"whole_com_w={whole_com_w[0].tolist()} "
+        f"wheel_axle_mid_w={wheel_axle_mid_w[0].tolist()} "
+        f"com_minus_axle_xy={(whole_com_w[0, :2] - wheel_axle_mid_w[0, :2]).tolist()}",
         flush=True,
     )
     episode_steps = torch.zeros(unwrapped.num_envs, dtype=torch.long, device=unwrapped.device)

@@ -4,8 +4,8 @@
 --------
 1. 目前以平地直立站穩為目標；保留速度追蹤與 curriculum term，以零權重或門檻停用。
 2. 只有輪子可以接地；base/thigh/calf 接地會強懲罰並終止，避免趴地刷分。
-3. 站姿預設 thigh=-0.60 rad、calf=+1.10 rad，base 目標高度配合 0.15/0.10 m 腿段。
-4. Mesh 為 local frame (STL 原點 == 關節軸心)，URDF visual/collision origin 全為 0。
+3. 現役 nominal pose 由 reset 共用資料定義：thigh=-0.50 rad、calf=+0.87 rad。
+4. Reset 高度由 URDF joint FK 與輪子 collision support geometry 計算，不假設 mesh origin 為關節軸心。
 """
 from pathlib import Path
 import math
@@ -37,7 +37,10 @@ URDF_PATH = str(ASSET_DIR / "urdf" / "Tancho_v3.urdf")
 STAND_THIGH = ce.NOMINAL_JOINT_POSITIONS["joint_thigh_L"]
 STAND_CALF = ce.NOMINAL_JOINT_POSITIONS["joint_calf_L"]
 RESET_ROOT_HEIGHT = ce.TARGET_ROOT_HEIGHT_M
-BASE_HEIGHT_TARGET = 0.18
+# Gate B nominal wheel-ground reset geometry on flat terrain.  Keep the reward
+# target tied to the same URDF-derived value used by reset so an asset update
+# cannot leave behind a stale hard-coded height.
+BASE_HEIGHT_TARGET = RESET_ROOT_HEIGHT
 IMU_POS_ROOT = (-0.00835741999, 0.0000000160456, -0.0294337942)
 IMU_ROT_ROOT = (0.707106781, 0.707106781, 0.0, 0.0)
 PPO_STEPS_PER_ITERATION = 24
@@ -129,9 +132,9 @@ class ActionsCfg:
     joint_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"],
-        # 0.25 rad 無法在下沉前建立足夠的預載扭矩；放寬控制範圍，
-        # 讓策略可主動伸腿支撐，而非只能等誤差變大後被動追趕。
-        scale=0.25,
+        # 限制策略每一維腿部 action 的最大目標偏移為 +/-0.10 rad。
+        # 避免 Kp=100 Nm/rad 時，單拍約 0.23 rad 的 target jump 直接觸發 12.5 Nm 飽和。
+        scale=0.1,
         use_default_offset=True,
         preserve_order=True,
     )
@@ -174,7 +177,7 @@ class ObservationsCfg:
         base_pos_z = ObsTerm(func=mdp.base_pos_z, scale=1.0)  
         projected_gravity = ObsTerm(func=mdp.projected_gravity)
         velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"})
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel, scale=1.0)
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel, scale=0.1)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05)
         actions = ObsTerm(func=mdp.last_action)
 
@@ -202,19 +205,13 @@ class TerminationsCfg:
         time_out=True,
     )
 
-    # base_below_minimum_height = TerminationTermCfg(
-    #     func=cr.base_below_minimum_height,
-    #     params={
-    #         "minimum_height": 0.14,
-    #         "minimum_below_steps": 10,
-    #     },
-    # )
+
 
 
 
 @configclass
 class EventCfg:
-    """重置與 Domain Randomization。"""
+    """重置、reset 重力漸進與 Domain Randomization。"""
 
     reset_tancho_on_wheels = EventTerm(
         func=ce.reset_tancho_on_wheels,
@@ -247,6 +244,17 @@ class EventCfg:
             "dynamic_friction_range": (0.8, 0.8),
             "restitution_range": (0.0, 0.0),
             "num_buckets": 64,
+        },
+    )
+
+    # 每個環境 reset 後獨立在 0.20 s 內由 0 g 平滑恢復至正常重力。
+    reset_gravity_ramp = EventTerm(
+        func=ce.apply_reset_gravity_ramp,
+        mode="interval",
+        interval_range_s=(0.01, 0.01),
+        params={
+            "duration_s": 0.20,
+            "asset_cfg": SceneEntityCfg("robot"),
         },
     )
 

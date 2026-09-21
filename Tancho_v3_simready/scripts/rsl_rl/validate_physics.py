@@ -748,11 +748,18 @@ def run_gate_a(env: Any, env_cfg: ManagerBasedRLEnvCfg, urdf_path: Path, rows: l
 
 
 # -----------------------------------------------------------------------------
-# Gate C: contact-free known wheel torque, M^-1*tau prediction, and dt/2
+# Gate C: contact-free known joint torque, M^-1*tau prediction, and dt/2
 # -----------------------------------------------------------------------------
 
 
-WHEEL_JOINT_NAMES = ["joint_wheel_L", "joint_wheel_R"]
+PROBE_JOINT_NAMES = [
+    "joint_thigh_L",
+    "joint_calf_L",
+    "joint_wheel_L",
+    "joint_thigh_R",
+    "joint_calf_R",
+    "joint_wheel_R",
+]
 TORQUE_AMPLITUDES = (0.05, 0.10, 0.20)
 
 
@@ -859,23 +866,6 @@ def _read_generalized_velocity(robot: Any, *, root_offset: int) -> torch.Tensor:
     return torch.cat((root_vel, joint_vel), dim=0)
 
 
-def _wheel_action(base_env: Any, wheel_term: Any, wheel_slot: int, torque: float) -> tuple[torch.Tensor, float, int]:
-    if not hasattr(wheel_term, "_scale"):
-        raise MissingAPIError("wheel effort action term exposes no scale; cannot issue known torque")
-    scale = wheel_term._scale
-    scale_value = float(scale if isinstance(scale, (int, float)) else scale[0, wheel_slot].item())
-    if abs(scale_value) <= 1.0e-12:
-        raise RuntimeError("wheel effort action scale is zero")
-    offset = 0
-    for name in base_env.action_manager.active_terms:
-        if name == "joint_vel":
-            break
-        offset += int(base_env.action_manager.get_term(name).action_dim)
-    action = torch.zeros((1, base_env.action_manager.total_action_dim), device=base_env.device, dtype=torch.float32)
-    action[0, offset + wheel_slot] = float(torque) / scale_value
-    return action, scale_value, offset
-
-
 def run_probe_for_dt(
     base_cfg: ManagerBasedRLEnvCfg,
     dt: float,
@@ -890,15 +880,15 @@ def run_probe_for_dt(
         env = gym.make(args_cli.task, cfg=cfg)
         base_env = env.unwrapped
         robot = base_env.scene["robot"]
-        wheel_ids, wheel_names = robot.find_joints(WHEEL_JOINT_NAMES, preserve_order=True)
-        if len(wheel_ids) != len(WHEEL_JOINT_NAMES):
-            raise RuntimeError(f"wheel joint resolution failed: {wheel_names!r}")
+        joint_ids, joint_names = robot.find_joints(PROBE_JOINT_NAMES, preserve_order=True)
+        if len(joint_ids) != len(PROBE_JOINT_NAMES):
+            raise RuntimeError(f"probe joint resolution failed: {joint_names!r}")
         view = getattr(robot, "root_physx_view", None)
         if view is None or not callable(getattr(view, "get_generalized_mass_matrices", None)):
             raise MissingAPIError("PhysX get_generalized_mass_matrices is unavailable")
         if not hasattr(robot.data, "joint_acc") or not hasattr(robot.data, "body_acc_w"):
             raise MissingAPIError("robot.data.joint_acc/body_acc_w are unavailable")
-        for wheel_slot, (wheel_id, wheel_name) in enumerate(zip(wheel_ids, wheel_names)):
+        for joint_slot, (joint_id, joint_name) in enumerate(zip(joint_ids, joint_names)):
             for amplitude in TORQUE_AMPLITUDES:
                 for sign in (1.0, -1.0):
                     torque = float(sign * amplitude)
@@ -920,16 +910,16 @@ def run_probe_for_dt(
                     root_offset = _generalized_joint_offset(width, int(robot.num_joints))
                     matrix = mass[0].to(dtype=torch.float64)
                     tau = torch.zeros(width, device=base_env.device, dtype=torch.float64)
-                    tau[root_offset + int(wheel_id)] = torque
+                    tau[root_offset + int(joint_id)] = torque
                     qdd_pred = torch.linalg.solve(matrix, tau)
                     qd_before = _read_generalized_velocity(robot, root_offset=root_offset).to(dtype=torch.float64)
                     # Gate C injects a physical effort directly into the
                     # articulation buffer.  Manager actions stage their target
                     # one update later, which would make the first measured
-                    # PhysX step appear to have zero wheel acceleration.
+                    # PhysX step appear to have zero joint acceleration.
                     robot.set_joint_effort_target(
                         torch.tensor([[torque]], device=base_env.device, dtype=torch.float32),
-                        joint_ids=[int(wheel_id)],
+                        joint_ids=[int(joint_id)],
                     )
                     robot.write_data_to_sim()
                     base_env.sim.step(render=False)
@@ -943,22 +933,28 @@ def run_probe_for_dt(
                     if qdd_meas.numel() != qdd_pred.numel():
                         raise RuntimeError(f"measured/predicted qdd width mismatch: {qdd_meas.shape} vs {qdd_pred.shape}")
                     contact_after = _contact_peak(base_env)
-                    actual_torque = float(robot.data.applied_torque[0, wheel_id].item())
-                    predicted_target = float(qdd_pred[root_offset + int(wheel_id)].item())
-                    measured_target = float(qdd_meas[root_offset + int(wheel_id)].item())
+                    actual_torque = float(robot.data.applied_torque[0, joint_id].item())
+                    predicted_target = float(qdd_pred[root_offset + int(joint_id)].item())
+                    measured_target = float(qdd_meas[root_offset + int(joint_id)].item())
                     fit_abs = float(torch.max(torch.abs(qdd_meas - qdd_pred)).item())
                     fit_rel = _relative_error(qdd_meas, qdd_pred, floor=1.0e-6)
                     torque_error = abs(actual_torque - torque)
                     fit_pass = fit_rel <= 0.25 or fit_abs <= 0.5
                     torque_pass = torque_error <= max(2.0e-3, abs(torque) * 0.03)
                     contact_pass = contact_after <= 1.0e-4
+                    direction_pass = (
+                        abs(predicted_target) > 1.0e-9
+                        and abs(measured_target) > 1.0e-9
+                        and math.copysign(1.0, predicted_target) == math.copysign(1.0, measured_target)
+                        and math.copysign(1.0, actual_torque) == math.copysign(1.0, torque)
+                    )
                     row = {
                         "gate": "gate-c",
                         "test": "known_torque",
-                        "status": "PASS" if (zero_state_pass and fit_pass and torque_pass and contact_pass) else "FAIL",
+                        "status": "PASS" if (zero_state_pass and fit_pass and torque_pass and contact_pass and direction_pass) else "FAIL",
                         "dt_s": float(dt),
-                        "wheel": wheel_name,
-                        "wheel_slot": wheel_slot,
+                        "joint": joint_name,
+                        "joint_slot": joint_slot,
                         "torque_Nm": torque,
                         "actual_torque_Nm": actual_torque,
                         "torque_error_Nm": torque_error,
@@ -976,13 +972,14 @@ def run_probe_for_dt(
                         "zero_state_pass": zero_state_pass,
                         "fit_pass": fit_pass,
                         "torque_pass": torque_pass,
+                        "direction_pass": direction_pass,
                         "contact_free_pass": contact_pass,
                     }
                     rows.append(row)
                     output["samples"].append(
                         {
-                            "wheel": wheel_name,
-                            "wheel_id": int(wheel_id),
+                            "joint": joint_name,
+                            "joint_id": int(joint_id),
                             "amplitude": amplitude,
                             "sign": int(sign),
                             "torque": torque,
@@ -1027,6 +1024,7 @@ def run_gate_c(base_cfg: ManagerBasedRLEnvCfg, rows: list[dict[str, Any]]) -> di
             bool(row.get("zero_state_pass"))
             and bool(row.get("fit_pass"))
             and bool(row.get("torque_pass"))
+            and bool(row.get("direction_pass"))
             and bool(row.get("contact_free_pass"))
             for row in direct_rows
         )
@@ -1037,17 +1035,17 @@ def run_gate_c(base_cfg: ManagerBasedRLEnvCfg, rows: list[dict[str, Any]]) -> di
             {"dt_s": probe_dt, "sample_count": len(direct_rows), "single_dt_process": True},
         )
         symmetry = []
-        for wheel_name in WHEEL_JOINT_NAMES:
+        for joint_name in PROBE_JOINT_NAMES:
             for amplitude in TORQUE_AMPLITUDES:
-                pos = next((s for s in probe["samples"] if s["wheel"] == wheel_name and s["amplitude"] == amplitude and s["sign"] == 1), None)
-                neg = next((s for s in probe["samples"] if s["wheel"] == wheel_name and s["amplitude"] == amplitude and s["sign"] == -1), None)
+                pos = next((s for s in probe["samples"] if s["joint"] == joint_name and s["amplitude"] == amplitude and s["sign"] == 1), None)
+                neg = next((s for s in probe["samples"] if s["joint"] == joint_name and s["amplitude"] == amplitude and s["sign"] == -1), None)
                 if pos is None or neg is None:
-                    symmetry.append({"wheel": wheel_name, "amplitude": amplitude, "pass": False, "reason": "missing pair"})
+                    symmetry.append({"joint": joint_name, "amplitude": amplitude, "pass": False, "reason": "missing pair"})
                     continue
                 residual = float(torch.max(torch.abs(pos["meas"] + neg["meas"])).item())
                 scale = max(float(torch.max(torch.abs(pos["pred"])).item()), 1.0e-6)
                 relative = residual / scale
-                symmetry.append({"wheel": wheel_name, "amplitude": amplitude, "max_abs": residual, "relative": relative, "pass": relative <= 0.20 or residual <= 0.5})
+                symmetry.append({"joint": joint_name, "amplitude": amplitude, "max_abs": residual, "relative": relative, "pass": relative <= 0.20 or residual <= 0.5})
         symmetry_pass = bool(symmetry) and all(item["pass"] for item in symmetry)
         _check(result, "positive_negative_torque_symmetry", symmetry_pass, symmetry)
         result["warnings"].append(
@@ -1069,6 +1067,7 @@ def run_gate_c(base_cfg: ManagerBasedRLEnvCfg, rows: list[dict[str, Any]]) -> di
         bool(row.get("zero_state_pass"))
         and bool(row.get("fit_pass"))
         and bool(row.get("torque_pass"))
+        and bool(row.get("direction_pass"))
         and bool(row.get("contact_free_pass"))
         for row in rows
         if row.get("gate") == "gate-c" and row.get("test") == "known_torque"
@@ -1089,38 +1088,38 @@ def run_gate_c(base_cfg: ManagerBasedRLEnvCfg, rows: list[dict[str, Any]]) -> di
     # generalized acceleration vector, not only the wheel coordinate.
     symmetry_checks: list[dict[str, Any]] = []
     for probe_dt, probe_samples in ((dt, samples_dt["samples"]), (dt * 0.5, samples_half["samples"])):
-        for wheel_name in WHEEL_JOINT_NAMES:
+        for joint_name in PROBE_JOINT_NAMES:
             for amplitude in TORQUE_AMPLITUDES:
-                pos = next((s for s in probe_samples if s["wheel"] == wheel_name and s["amplitude"] == amplitude and s["sign"] == 1), None)
-                neg = next((s for s in probe_samples if s["wheel"] == wheel_name and s["amplitude"] == amplitude and s["sign"] == -1), None)
+                pos = next((s for s in probe_samples if s["joint"] == joint_name and s["amplitude"] == amplitude and s["sign"] == 1), None)
+                neg = next((s for s in probe_samples if s["joint"] == joint_name and s["amplitude"] == amplitude and s["sign"] == -1), None)
                 if pos is None or neg is None:
-                    symmetry_checks.append({"dt_s": probe_dt, "wheel": wheel_name, "amplitude": amplitude, "pass": False, "reason": "missing +/- pair"})
+                    symmetry_checks.append({"dt_s": probe_dt, "joint": joint_name, "amplitude": amplitude, "pass": False, "reason": "missing +/- pair"})
                     continue
                 residual = torch.max(torch.abs(pos["meas"] + neg["meas"])).item()
                 scale = max(float(torch.max(torch.abs(pos["pred"])).item()), float(torch.max(torch.abs(neg["pred"])).item()), 1.0e-6)
                 relative = float(residual) / scale
-                symmetry_checks.append({"dt_s": probe_dt, "wheel": wheel_name, "amplitude": amplitude, "max_abs": float(residual), "relative": relative, "pass": relative <= 0.20 or residual <= 0.5})
+                symmetry_checks.append({"dt_s": probe_dt, "joint": joint_name, "amplitude": amplitude, "max_abs": float(residual), "relative": relative, "pass": relative <= 0.20 or residual <= 0.5})
     symmetry_pass = bool(symmetry_checks) and all(item["pass"] for item in symmetry_checks)
     _check(result, "positive_negative_torque_symmetry", symmetry_pass, symmetry_checks)
 
     # dt/2 convergence: measured first-step generalized qdd should approach the
     # same M^-1*tau prediction as dt shrinks.  This is intentionally evaluated
-    # against the target wheel coordinate and the full-vector error norm.
+    # against the target joint coordinate and the full-vector error norm.
     convergence_checks: list[dict[str, Any]] = []
-    for wheel_name in WHEEL_JOINT_NAMES:
+    for joint_name in PROBE_JOINT_NAMES:
         for amplitude in TORQUE_AMPLITUDES:
             for sign in (1, -1):
-                coarse = next((s for s in samples_dt["samples"] if s["wheel"] == wheel_name and s["amplitude"] == amplitude and s["sign"] == sign), None)
-                fine = next((s for s in samples_half["samples"] if s["wheel"] == wheel_name and s["amplitude"] == amplitude and s["sign"] == sign), None)
+                coarse = next((s for s in samples_dt["samples"] if s["joint"] == joint_name and s["amplitude"] == amplitude and s["sign"] == sign), None)
+                fine = next((s for s in samples_half["samples"] if s["joint"] == joint_name and s["amplitude"] == amplitude and s["sign"] == sign), None)
                 if coarse is None or fine is None:
-                    convergence_checks.append({"wheel": wheel_name, "amplitude": amplitude, "sign": sign, "pass": False, "reason": "missing dt pair"})
+                    convergence_checks.append({"joint": joint_name, "amplitude": amplitude, "sign": sign, "pass": False, "reason": "missing dt pair"})
                     continue
                 change = float(torch.max(torch.abs(coarse["meas"] - fine["meas"])).item())
                 scale = max(float(torch.max(torch.abs(coarse["pred"])).item()), float(torch.max(torch.abs(fine["pred"])).item()), 1.0e-6)
                 relative = change / scale
                 # Finite-difference first-step acceleration is expected to
                 # change O(dt); 20% is conservative for this small probe.
-                convergence_checks.append({"wheel": wheel_name, "amplitude": amplitude, "sign": sign, "max_abs": change, "relative": relative, "pass": relative <= 0.20 or change <= 0.5})
+                convergence_checks.append({"joint": joint_name, "amplitude": amplitude, "sign": sign, "max_abs": change, "relative": relative, "pass": relative <= 0.20 or change <= 0.5})
     convergence_pass = bool(convergence_checks) and all(item["pass"] for item in convergence_checks)
     _check(result, "dt_and_dt_half_convergence", convergence_pass, {"dt_s": dt, "dt_half_s": dt * 0.5, "cases": convergence_checks})
 
@@ -1210,10 +1209,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     direct_rows = [row for row in rows if row.get("gate") == "gate-c" and row.get("test") == "known_torque"]
     if direct_rows:
         print("\nGate-C contact-free first-step samples:")
-        print("  dt[s]  wheel  tau[Nm]  qdd_pred  qdd_meas  fit_rel  status")
+        print("  dt[s]  joint          tau[Nm]  qdd_pred  qdd_meas  fit_rel  status")
         for row in direct_rows:
             print(
-                f"  {float(row['dt_s']):.6f}  {str(row['wheel']):<6}  "
+                f"  {float(row['dt_s']):.6f}  {str(row['joint']):<14}  "
                 f"{float(row['torque_Nm']):+7.3f}  {float(row['qdd_pred_target_rad_s2']):+9.3f}  "
                 f"{float(row['qdd_meas_target_rad_s2']):+9.3f}  {float(row['qdd_fit_relative']):7.4f}  "
                 f"{row['status']}"

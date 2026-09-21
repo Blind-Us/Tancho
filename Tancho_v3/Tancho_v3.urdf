@@ -13,34 +13,22 @@
         <mesh filename="meshes/base_link.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/base_link.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/base_link001.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/base_link001.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/base_link002.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+    <collision name="base_link_collision_box">
+      <origin xyz="0 -0.000093 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/base_link002.stl" />
+        <box size="0.18 0.091216 0.12" />
       </geometry>
     </collision>
   </link>
@@ -56,10 +44,10 @@
         <mesh filename="meshes/drawer.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+    <collision name="drawer_collision_box">
+      <origin xyz="-0.022449 0.0025 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/drawer.stl" />
+        <box size="0.141298 0.065 0.054994" />
       </geometry>
     </collision>
   </link>
@@ -75,10 +63,10 @@
         <mesh filename="meshes/pi_case.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+    <collision name="pi_case_collision_box">
+      <origin xyz="0.0232 0.0475 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/pi_case.stl" />
+        <box size="0.1036 0.025 0.0656" />
       </geometry>
     </collision>
   </link>
@@ -94,34 +82,28 @@
         <mesh filename="meshes/joint_thigh_L.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/joint_thigh_L.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/thigh_L.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/thigh_L.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/knee_cover_L.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+    <collision name="thigh_L_collision_box">
+      <origin xyz="-4e-06 -0.079502 -0.028005" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/knee_cover_L.stl" />
+        <box size="0.075988 0.216993 0.01" />
+      </geometry>
+    </collision>
+    <collision name="knee_cover_L_collision_cylinder">
+      <origin xyz="0 -0.15 -0.003005" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.038" length="0.04" />
       </geometry>
     </collision>
   </link>
@@ -137,24 +119,24 @@
         <mesh filename="meshes/joint_knee_L.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/joint_knee_L.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/calf_L.stl" />
       </geometry>
     </visual>
-    <collision>
+    <collision name="calf_L_collision_mesh">
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/calf_L.stl" />
       </geometry>
     </collision>
+    <visual name="joint_wheel_L_stator_visual">
+      <origin xyz="4.58907579e-13 -0.0999975373 -0.0455046153" rpy="3.14159265 0 0" />
+      <geometry>
+        <mesh filename="meshes/joint_wheel_L.stl" />
+      </geometry>
+    </visual>
   </link>
   <link name="wheel_L">
     <inertial>
@@ -165,37 +147,19 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/joint_wheel_L.stl" />
-      </geometry>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/joint_wheel_L.stl" />
-      </geometry>
-    </collision>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
         <mesh filename="meshes/wheel_L.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/wheel_L.stl" />
-      </geometry>
-    </collision>
     <visual name="tpu_canonical_L_visual">
       <origin xyz="0 0 0.007" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/wheel_tpu.stl" />
       </geometry>
     </visual>
-    <collision name="tpu_canonical_L">
+    <collision name="wheel_L_round_tire_collision">
       <origin xyz="0 0 0.007" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/wheel_tpu.stl" />
+        <cylinder radius="0.03614" length="0.017" />
       </geometry>
     </collision>
   </link>
@@ -211,34 +175,28 @@
         <mesh filename="meshes/joint_thigh_R.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/joint_thigh_R.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/thigh_R.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/thigh_R.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/knee_cover_R.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+    <collision name="thigh_R_collision_box">
+      <origin xyz="-4e-06 -0.079502 0.028005" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/knee_cover_R.stl" />
+        <box size="0.075988 0.216993 0.01" />
+      </geometry>
+    </collision>
+    <collision name="knee_cover_R_collision_cylinder">
+      <origin xyz="0 -0.15 0.003005" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.038" length="0.04" />
       </geometry>
     </collision>
   </link>
@@ -254,24 +212,24 @@
         <mesh filename="meshes/joint_knee_R.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/joint_knee_R.stl" />
-      </geometry>
-    </collision>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/calf_R.stl" />
       </geometry>
     </visual>
-    <collision>
+    <collision name="calf_R_collision_mesh">
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/calf_R.stl" />
       </geometry>
     </collision>
+    <visual name="joint_wheel_R_stator_visual">
+      <origin xyz="-1.5894841e-14 -0.0999975373 0.0455046153" rpy="3.14159265 0 0" />
+      <geometry>
+        <mesh filename="meshes/joint_wheel_R.stl" />
+      </geometry>
+    </visual>
   </link>
   <link name="wheel_R">
     <inertial>
@@ -282,37 +240,19 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/joint_wheel_R.stl" />
-      </geometry>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/joint_wheel_R.stl" />
-      </geometry>
-    </collision>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
         <mesh filename="meshes/wheel_R.stl" />
       </geometry>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/wheel_R.stl" />
-      </geometry>
-    </collision>
     <visual name="tpu_canonical_R_visual">
       <origin xyz="0 0 -0.007" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/wheel_tpu.stl" />
       </geometry>
     </visual>
-    <collision name="tpu_canonical_R">
+    <collision name="wheel_R_round_tire_collision">
       <origin xyz="0 0 -0.007" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/wheel_tpu.stl" />
+        <cylinder radius="0.03614" length="0.017" />
       </geometry>
     </collision>
   </link>

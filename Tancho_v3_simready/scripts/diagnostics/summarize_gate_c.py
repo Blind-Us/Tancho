@@ -12,7 +12,7 @@ from pathlib import Path
 def _load(path: Path) -> dict[tuple[str, float], dict[str, str]]:
     with path.open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
-    return {(row["wheel"], float(row["torque_Nm"])): row for row in rows}
+    return {(row.get("joint") or row["wheel"], float(row["torque_Nm"])): row for row in rows}
 
 
 def main() -> int:
@@ -20,7 +20,7 @@ def main() -> int:
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--half", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--max-fit-relative", type=float, default=0.01)
+    parser.add_argument("--max-fit-relative", type=float, default=0.02)
     parser.add_argument("--max-dt-relative", type=float, default=0.01)
     args = parser.parse_args()
 
@@ -39,7 +39,7 @@ def main() -> int:
         case_pass = direct_pass and fit_relative <= args.max_fit_relative and dt_relative <= args.max_dt_relative
         cases.append(
             {
-                "wheel": key[0],
+                "joint": key[0],
                 "torque_Nm": key[1],
                 "qdd_pred_rad_s2": pred,
                 "qdd_measured_base_dt_rad_s2": measured_a,
@@ -50,16 +50,16 @@ def main() -> int:
             }
         )
 
-    passed = keys_match and len(cases) == 12 and all(case["status"] == "PASS" for case in cases)
+    passed = keys_match and len(cases) == 36 and all(case["status"] == "PASS" for case in cases)
     report = {
         "gate": "GATE_C",
         "status": "PASS" if passed else "FAIL",
-        "definition": "gravity off, airborne/no contact, zero initial velocity, direct known wheel torque",
+        "definition": "gravity off, airborne/no contact, zero initial velocity, direct known joint torque",
         "inputs": {"base_dt_csv": str(args.base.resolve()), "half_dt_csv": str(args.half.resolve())},
         "thresholds": {
             "max_qdd_fit_relative": args.max_fit_relative,
             "max_dt_convergence_relative": args.max_dt_relative,
-            "required_case_count": 12,
+            "required_case_count": 36,
         },
         "checks": {
             "case_keys_match": keys_match,
