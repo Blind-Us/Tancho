@@ -173,6 +173,6 @@ class TanchoV3FixedFlatPlayEnvCfg(TanchoV3FixedFlatEnvCfg):
         super().__post_init__()
         self.scene.num_envs = 1
         self.events.push_robot.interval_range_s = (10.0, 10.0)
-        self.events.push_robot.params["velocity_range"] = {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}
+        self.events.push_robot.params["velocity_range"] = {"x": (-0.2, 0.2), "y": (-0.2, 0.2)}
         self.events.push_robot.params["debug_vis"] = True
         self.events.push_robot.params["push_probability"] = 1.0

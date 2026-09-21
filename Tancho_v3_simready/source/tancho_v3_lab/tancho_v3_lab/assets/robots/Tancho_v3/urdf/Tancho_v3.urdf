@@ -125,10 +125,10 @@
         <mesh filename="meshes/calf_L.stl" />
       </geometry>
     </visual>
-    <collision name="calf_L_collision_box">
-      <origin xyz="0.000133 -0.047748 -0.027005" rpy="0 0 0" />
+    <collision name="calf_L_collision_mesh">
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <box size="0.057265 0.152494 0.008" />
+        <mesh filename="meshes/calf_L.stl" />
       </geometry>
     </collision>
     <visual name="joint_wheel_L_stator_visual">
@@ -218,10 +218,10 @@
         <mesh filename="meshes/calf_R.stl" />
       </geometry>
     </visual>
-    <collision name="calf_R_collision_box">
-      <origin xyz="0.000133 -0.047748 0.027005" rpy="0 0 0" />
+    <collision name="calf_R_collision_mesh">
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <box size="0.057265 0.152494 0.008" />
+        <mesh filename="meshes/calf_R.stl" />
       </geometry>
     </collision>
     <visual name="joint_wheel_R_stator_visual">

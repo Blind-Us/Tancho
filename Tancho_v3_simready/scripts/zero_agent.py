@@ -67,7 +67,10 @@ def main():
     printed_first_done = False
 
     while simulation_app.is_running() and (args_cli.max_steps <= 0 or control_steps < args_cli.max_steps):
-        if control_steps in (2, 5, 10, 20, 39):
+        # Keep the startup window dense: an illegal-contact termination may
+        # auto-reset the articulation before a sparse diagnostic sample can
+        # reveal which body caused it.
+        if control_steps < 12 or control_steps in (20, 39):
             root_force = torch.linalg.vector_norm(contact_sensor.data.net_forces_w[0, root_body_ids], dim=-1)
             wheel_force = torch.linalg.vector_norm(contact_sensor.data.net_forces_w[0, wheel_body_ids], dim=-1)
             thigh_force = torch.linalg.vector_norm(contact_sensor.data.net_forces_w[0, thigh_body_ids], dim=-1)

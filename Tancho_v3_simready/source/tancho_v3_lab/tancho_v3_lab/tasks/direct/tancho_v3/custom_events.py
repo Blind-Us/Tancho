@@ -443,6 +443,9 @@ def push_tancho_along_wheel_tangent(
         # marker shows the impulse that was actually applied at that instant.
         env._tancho_last_push_world_xy = delta_velocity_xy / delta_magnitude[:, None].clamp_min(1.0e-9)
         env._tancho_last_push_magnitude = delta_magnitude
+        env._tancho_push_reference_magnitude = math.hypot(
+            max(abs(x_min), abs(x_max)), max(abs(y_min), abs(y_max))
+        )
         env._tancho_push_visible_until_step = int(env.common_step_counter) + max(
             1, math.ceil(1.0 / env.step_dt)
         )
@@ -518,7 +521,9 @@ def visualize_tancho_directions(env, env_ids, asset_name: str = "robot"):
     # changes, so magnitude can be compared without a size/position confound.
     normal_scale = torch.tensor((0.65, 0.14, 0.14), device=asset.device).repeat(len(env_ids), 1)
     push_scale = torch.ones((len(env_ids), 3), device=asset.device)
-    push_scale[:, 0] = push_magnitude / math.sqrt(0.5)
+    push_scale[:, 0] = push_magnitude / max(
+        getattr(env, "_tancho_push_reference_magnitude", 1.0), 1.0e-9
+    )
     push_scale[:, 1:] = 0.14
     policy_scale = torch.ones((len(env_ids), 3), device=asset.device)
     policy_scale[:, 0] = mean_torque.abs() / 0.45

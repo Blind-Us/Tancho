@@ -102,7 +102,7 @@ class TanchoV3SceneCfg(InteractiveSceneCfg):
             "wheels": ImplicitActuatorCfg(
                 joint_names_expr=["joint_wheel_L", "joint_wheel_R"],
                 stiffness=0.0,
-                damping=0.1,
+                damping=0.0,
                 effort_limit_sim=0.45,
                 velocity_limit_sim=188,
             ),
@@ -131,7 +131,7 @@ class ActionsCfg:
         joint_names=["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"],
         # 0.25 rad 無法在下沉前建立足夠的預載扭矩；放寬控制範圍，
         # 讓策略可主動伸腿支撐，而非只能等誤差變大後被動追趕。
-        scale=0.0,
+        scale=0.25,
         use_default_offset=True,
         preserve_order=True,
     )

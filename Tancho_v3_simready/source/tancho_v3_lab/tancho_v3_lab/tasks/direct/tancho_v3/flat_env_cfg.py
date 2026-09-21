@@ -3,7 +3,12 @@ import math
 import isaaclab.envs.mdp as mdp
 import isaaclab.sim as sim_utils
 from isaaclab.envs import ManagerBasedRLEnvCfg
-from isaaclab.managers import EventTermCfg as EventTerm, RewardTermCfg as RewardTerm, SceneEntityCfg
+from isaaclab.managers import (
+    EventTermCfg as EventTerm,
+    RewardTermCfg as RewardTerm,
+    SceneEntityCfg,
+    TerminationTermCfg as TerminationTerm,
+)
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 
@@ -78,7 +83,7 @@ class FlatRewardsCfg:
         # x_dot -> 0
         lin_vel = RewardTerm(
             func=cr.lin_vel_xy_l2,
-            weight=-0.2,
+            weight=-0.5,
             params={
                 "asset_cfg": SceneEntityCfg("robot"),
             },
@@ -108,6 +113,22 @@ class TanchoV3FlatSceneCfg(TanchoV3SceneCfg):
 
 
 @configclass
+class FullBodyTerminationsCfg(TerminationsCfg):
+    """Match the fixed asset's effective no-nonwheel-contact rule."""
+
+    base_contact = TerminationTerm(
+        func=mdp.illegal_contact,
+        params={
+            "sensor_cfg": SceneEntityCfg(
+                "contact_forces",
+                body_names=["base_link_root", "thigh_.*", "calf_.*"],
+            ),
+            "threshold": 10.0,
+        },
+    )
+
+
+@configclass
 class FlatPlayEventCfg(EventCfg):
     direction_markers = EventTerm(
         func=ce.visualize_tancho_directions,
@@ -123,7 +144,7 @@ class TanchoV3FlatEnvCfg(ManagerBasedRLEnvCfg):
     commands: CommandsCfg = CommandsCfg()
     observations: ObservationsCfg = ObservationsCfg()
     rewards: FlatRewardsCfg = FlatRewardsCfg()
-    terminations: TerminationsCfg = TerminationsCfg()
+    terminations: FullBodyTerminationsCfg = FullBodyTerminationsCfg()
     events: EventCfg = EventCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
 
@@ -144,6 +165,6 @@ class TanchoV3FlatPlayEnvCfg(TanchoV3FlatEnvCfg):
         super().__post_init__()
         self.scene.num_envs = 1
         self.events.push_robot.interval_range_s = (10.0, 10.0)
-        self.events.push_robot.params["velocity_range"] = {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}
+        self.events.push_robot.params["velocity_range"] = {"x": (-0.2, 0.2), "y": (-0.2, 0.2)}
         self.events.push_robot.params["debug_vis"] = True
         self.events.push_robot.params["push_probability"] = 1.0

@@ -126,10 +126,10 @@
         <cylinder radius="0.038" length="0.04" />
       </geometry>
     </collision>
-    <collision name="calf_L_collision_box">
-      <origin xyz="-0.0352848433083 0.0970003852625 -0.17555339905" rpy="1.57079633023 -0.37 -1.24314155937e-09" />
+    <collision name="calf_L_collision_mesh">
+      <origin xyz="-0.0526752564908 0.0699953851201 -0.131084727891" rpy="1.57079633023 -0.37 -1.24314155937e-09" />
       <geometry>
-        <box size="0.057265 0.152494 0.008" />
+        <mesh filename="meshes/calf_L.stl" />
       </geometry>
     </collision>
     <collision name="thigh_R_collision_box">
@@ -144,10 +144,10 @@
         <cylinder radius="0.038" length="0.04" />
       </geometry>
     </collision>
-    <collision name="calf_R_collision_box">
-      <origin xyz="-0.0352848433084 -0.0970003841375 -0.175553399672" rpy="1.57079633023 -0.37 -1.24314155937e-09" />
+    <collision name="calf_R_collision_mesh">
+      <origin xyz="-0.0526752564908 -0.0699953842799 -0.13108472834" rpy="1.57079633023 -0.37 -1.24314155937e-09" />
       <geometry>
-        <box size="0.057265 0.152494 0.008" />
+        <mesh filename="meshes/calf_R.stl" />
       </geometry>
     </collision>
     <visual name="joint_wheel_L_stator_visual">
