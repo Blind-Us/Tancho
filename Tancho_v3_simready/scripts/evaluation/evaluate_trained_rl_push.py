@@ -53,7 +53,8 @@ import tancho_v3_lab
 import tancho_v3_lab.tasks  # noqa: F401
 
 
-FORCES_N = (2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 34, 36, 38, 39, 40, 42, 45, 50, 60)
+# 0 N is the undisturbed standing (idle) case.
+FORCES_N = (0, 2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 34, 36, 38, 39, 40, 42, 45, 50, 60)
 PULSE_DURATION_S = 0.05
 FAILURE_PITCH_DEG = 15.0
 SETTLE_BAND_DEG = 1.0
@@ -65,6 +66,9 @@ GROUND_CONTACT_THRESHOLD_N = 10.0
 WHEEL_RADIUS_M = 0.03614  # wheel collision cylinder radius
 WHEEL_LIFTOFF_N = 0.5
 SLIP_THRESHOLD_M_S = 0.1
+HOME_TOLERANCE_M = 0.05
+CHECK_TIME_S = 5.0
+BALANCE_BAND_DEG = 1.0
 
 
 def pitch_wxyz(quat: torch.Tensor) -> torch.Tensor:
@@ -226,7 +230,9 @@ def main() -> None:
             "pitch_deg": pitch[:, None],
             "pitch_rate_rad_s": robot.data.root_ang_vel_b[:, 1:2],
             "base_x_m": pos[:, 0:1],
+            "base_y_m": pos[:, 1:2],
             "base_vx_m_s": robot.data.root_lin_vel_w[:, 0:1],
+            "base_vy_m_s": robot.data.root_lin_vel_w[:, 1:2],
             "wheel_L_q_rad": robot.data.joint_pos[:, 0:1],
             "wheel_R_q_rad": robot.data.joint_pos[:, 1:2],
             "wheel_L_qd_rad_s": robot.data.joint_vel[:, 0:1],
@@ -277,6 +283,14 @@ def main() -> None:
     zero_force = torch.zeros(len(FORCES_N), device=core.device)
     pitch0_deg = torch.rad2deg(pitch_wxyz(robot.data.root_link_quat_w)).cpu().tolist()
     pitch0_t = torch.tensor(pitch0_deg, device=core.device)
+    # Static balance pitch: rotate about the wheel axle until the whole-robot COM is
+    # above it (COM ahead of the axle -> lean back).  Positive pitch is nose-down.
+    mass = robot.data.default_mass.to(core.device)
+    com_w = (robot.data.body_com_pos_w * mass[..., None]).sum(dim=1) / mass.sum(dim=1, keepdim=True)
+    axle_w = robot.data.body_link_pos_w[:, wheel_body_ids].mean(dim=1)
+    heading_w = quat_rotate_wxyz(robot.data.root_link_quat_w, torch.tensor([[1.0, 0.0, 0.0]], device=core.device))[:, 0]
+    rel = com_w - axle_w
+    balance_deg = (pitch0_t - torch.rad2deg(torch.atan2((rel * heading_w).sum(dim=1), rel[:, 2]))).cpu().tolist()
     record(0.0, zero_force)
     for step in range(steps):
         # Scale each policy step by its overlap with the pulse window so the total
@@ -327,6 +341,9 @@ def main() -> None:
         "pitch_dev_at_first_ground_contact_deg", "ground_contact_duration_s",
         "max_wheel_speed_rad_s", "max_abs_slip_m_s", "first_slip_time_s",
         "first_wheel_liftoff_time_s", "wheel_liftoff_duration_s", "initial_pitch_deg",
+        "balance_pitch_deg", "max_abs_pitch_from_balance_deg",
+        "max_displacement_m", "displacement_at_5s_m", "velocity_at_5s_m_s", "return_time_s",
+        "final_displacement_m", "returned_within_5s", "idle_pass",
     ]
     with summary_path.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=summary_fields)
@@ -341,6 +358,16 @@ def main() -> None:
             slip_t = next((r["time_s"] for r in case_rows
                            if max(abs(r["wheel_L_slip_m_s"]), abs(r["wheel_R_slip_m_s"])) > SLIP_THRESHOLD_M_S), "")
             lift = [min(r["wheel_L_normal_force_N"], r["wheel_R_normal_force_N"]) < WHEEL_LIFTOFF_N for r in case_rows]
+            x0, y0 = case_rows[0]["base_x_m"], case_rows[0]["base_y_m"]
+            disp = [math.hypot(r["base_x_m"] - x0, r["base_y_m"] - y0) for r in case_rows]
+            at_check = min(case_rows, key=lambda r: abs(r["time_s"] - CHECK_TIME_S))
+            # Return time: from then on the robot stays within HOME_TOLERANCE_M until the end of the run.
+            last_out = max((r["time_s"] for r, d in zip(case_rows, disp) if d > HOME_TOLERANCE_M), default=None)
+            if last_out is None:
+                return_t = 0.0
+            else:
+                return_t = next((r["time_s"] for r in case_rows if r["time_s"] > last_out), None)
+            from_balance = max(abs(r["pitch_deg"] - balance_deg[i]) for r in case_rows)
             writer.writerow(
                 {
                     "controller": "trained_rl",
@@ -371,6 +398,16 @@ def main() -> None:
                     "first_wheel_liftoff_time_s": next((r["time_s"] for r, l in zip(case_rows, lift) if l), ""),
                     "wheel_liftoff_duration_s": round(dt * sum(lift[1:]), 4),
                     "initial_pitch_deg": pitch0_deg[i],
+                    "balance_pitch_deg": balance_deg[i],
+                    "max_abs_pitch_from_balance_deg": from_balance,
+                    "max_displacement_m": max(disp),
+                    "displacement_at_5s_m": math.hypot(at_check["base_x_m"] - x0, at_check["base_y_m"] - y0),
+                    "velocity_at_5s_m_s": math.hypot(at_check["base_vx_m_s"], at_check["base_vy_m_s"]),
+                    "return_time_s": "" if return_t is None else return_t,
+                    "final_displacement_m": disp[-1],
+                    "returned_within_5s": int(return_t is not None and return_t <= CHECK_TIME_S),
+                    "idle_pass": "" if level != 0 else int(
+                        max(disp) < HOME_TOLERANCE_M and from_balance <= BALANCE_BAND_DEG),
                 }
             )
     metadata = {
@@ -395,6 +432,13 @@ def main() -> None:
         },
         "base_collision_shapes": shape_names,
         "duration_s": args.duration,
+        "position_metrics": {
+            "displacement": "horizontal distance of the root link from its t=0 position",
+            "return_time_s": f"time after which displacement stays <= {HOME_TOLERANCE_M} m to the end of the run",
+            "idle_pass": f"0 N case: max displacement < {HOME_TOLERANCE_M} m and |pitch - balance| <= "
+                         f"{BALANCE_BAND_DEG} deg for the whole run",
+            "balance_pitch": "pitch at which the whole-robot COM is above the wheel axle",
+        },
         "plot_major_tick_s": 0.5,
         "plot_intervals": 10,
     }
