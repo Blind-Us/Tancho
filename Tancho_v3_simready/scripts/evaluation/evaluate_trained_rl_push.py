@@ -185,6 +185,12 @@ def main() -> None:
     # on pitch below; base contact is only logged.
     for term_name in list(cfg.terminations.to_dict()):
         setattr(cfg.terminations, term_name, None)
+    # Stand still: zero velocity / yaw-rate command in every env, whatever the task trained with.
+    command = cfg.commands.base_velocity
+    command.rel_standing_envs = 1.0
+    command.ranges.lin_vel_x = (0.0, 0.0)
+    command.ranges.lin_vel_y = (0.0, 0.0)
+    command.ranges.ang_vel_z = (0.0, 0.0)
     env = gym.make(args.task, cfg=cfg)
     env = RslRlVecEnvWrapper(env, clip_actions=1.0)
     core = env.unwrapped
