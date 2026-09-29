@@ -38,6 +38,11 @@ parser.add_argument(
 )
 parser.add_argument("--duration", type=float, default=5.0)
 parser.add_argument("--output-dir", type=Path, default=Path("logs/evaluation"))
+parser.add_argument(
+    "--symmetric-actions",
+    action="store_true",
+    help="Apply the mean of the two wheel actions to both wheels (planar, LQR-equivalent DOF; no differential/yaw).",
+)
 parser.add_argument("--obs-dim", type=int, default=None, help="Expected policy observation size (checked if given).")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
@@ -74,6 +79,11 @@ BALANCE_BAND_DEG = 1.0
 def pitch_wxyz(quat: torch.Tensor) -> torch.Tensor:
     w, x, y, z = quat.unbind(-1)
     return torch.asin(torch.clamp(2.0 * (w * y - z * x), -1.0, 1.0))
+
+
+def yaw_wxyz(quat: torch.Tensor) -> torch.Tensor:
+    w, x, y, z = quat.unbind(-1)
+    return torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 
 def quat_rotate_wxyz(quat: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
@@ -228,6 +238,7 @@ def main() -> None:
         lowest_z, lowest_shape = shape_z.min(dim=1)
         fields = {
             "pitch_deg": pitch[:, None],
+            "yaw_deg": torch.rad2deg(yaw_wxyz(quat))[:, None],
             "pitch_rate_rad_s": robot.data.root_ang_vel_b[:, 1:2],
             "base_x_m": pos[:, 0:1],
             "base_y_m": pos[:, 1:2],
@@ -309,6 +320,8 @@ def main() -> None:
         with torch.inference_mode():
             # The exported TorchScript policy takes the flat policy tensor, not the wrapper's TensorDict.
             actions = policy(obs["policy"])
+            if args.symmetric_actions:
+                actions = actions.mean(dim=1, keepdim=True).expand_as(actions).contiguous()
             obs, _, dones, _ = env.step(actions)
         # With no termination terms a done means something reset the env anyway: flag it.
         unexpected_reset |= dones.bool()
@@ -343,7 +356,7 @@ def main() -> None:
         "first_wheel_liftoff_time_s", "wheel_liftoff_duration_s", "initial_pitch_deg",
         "balance_pitch_deg", "max_abs_pitch_from_balance_deg",
         "max_displacement_m", "displacement_at_5s_m", "velocity_at_5s_m_s", "return_time_s",
-        "final_displacement_m", "returned_within_5s", "idle_pass",
+        "final_displacement_m", "returned_within_5s", "idle_pass", "max_abs_yaw_deg",
     ]
     with summary_path.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=summary_fields)
@@ -406,6 +419,7 @@ def main() -> None:
                     "return_time_s": "" if return_t is None else return_t,
                     "final_displacement_m": disp[-1],
                     "returned_within_5s": int(return_t is not None and return_t <= CHECK_TIME_S),
+                    "max_abs_yaw_deg": max(abs(r["yaw_deg"] - case_rows[0]["yaw_deg"]) for r in case_rows),
                     "idle_pass": "" if level != 0 else int(
                         max(disp) < HOME_TOLERANCE_M and from_balance <= BALANCE_BAND_DEG),
                 }
@@ -432,6 +446,7 @@ def main() -> None:
         },
         "base_collision_shapes": shape_names,
         "duration_s": args.duration,
+        "symmetric_actions": args.symmetric_actions,
         "position_metrics": {
             "displacement": "horizontal distance of the root link from its t=0 position",
             "return_time_s": f"time after which displacement stays <= {HOME_TOLERANCE_M} m to the end of the run",
