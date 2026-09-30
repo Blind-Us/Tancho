@@ -2,7 +2,8 @@
 """Plot trained-RL push-sweep summary on the same three axes as the LQR report.
 
 (a) push force vs max pitch deviation  (x 0-60 N, y 0-16 deg, 15 deg failure line)
-(b) push force vs settling time        (+-1 deg held 0.5 s, y 0-5 s, 0.5 s ticks, recovered only)
+(b) push force vs settling time        (+-1 deg of the balance pitch held 0.5 s, from push onset;
+                                        0 if the band was never left; y 0-5 s, 0.5 s ticks, recovered only)
 (c) push force vs peak wheel torque    (y 0-0.47 N*m, 0.45 N*m limit line)
 
 Usage: python plot_rl_push_lqr_axes.py <run_dir containing trained_rl_push_summary.csv>
@@ -40,7 +41,7 @@ def panel_b(b):
     st = [(f, float(r["settling_time_s"])) for f, r in zip(F, rows) if r["recovered"] == "1" and r["settling_time_s"]]
     if st:
         b.plot(*zip(*st), "o-", c="tab:green")
-    b.set(xlim=(0, 62), ylim=(0, 5), xlabel="push force (N)", ylabel="settling time (s)\n(time to return within ±1 deg)",
+    b.set(xlim=(0, 62), ylim=(0, 5), xlabel="push force (N)", ylabel="settling time (s)\n(±1 deg of balance held 0.5 s; 0 = never left)",
           title="(b) Recovery time vs. disturbance magnitude")
     b.xaxis.set_major_locator(MultipleLocator(10)); b.yaxis.set_major_locator(MultipleLocator(0.5)); b.grid(alpha=.3)
 

@@ -2,11 +2,16 @@
 """Run the frozen wheel-only RL policy through the LQR push-test envelope.
 
 The fixed asset remains at the policy's training pose (thigh=-0.50,
-calf=+0.87).  A 50 ms, body-level horizontal pulse is split over policy steps
-by overlap with the pulse window (100 Hz: five full steps), so its total
-impulse is exactly F*0.05 without changing the trained controller frequency.
+calf=+0.87).  A body-level horizontal pulse (default 50 ms, along the heading,
+at the COM) is split over policy steps by overlap with the pulse window
+(100 Hz: five full steps; 50 Hz: 1, 1, 0.5), so its total impulse is exactly
+F*T without changing the trained controller frequency.  ``--pulse-duration``
+and ``--push-angle-deg`` give the out-of-distribution pushes (e.g. 200 ms,
+30 deg off the heading).
 
 Evaluation-only overrides (the training cfg files are not touched):
+  * training randomisation off: observation noise, action delay, mass and COM
+    randomisation removed, robot friction back to the nominal 0.8;
   * every termination term is removed, so the environment never auto-resets;
   * failure is judged only by |pitch - initial pitch| >= 15 deg;
   * ground contact of ``base_link_root`` (which carries the merged leg
@@ -44,6 +49,10 @@ parser.add_argument(
     help="Apply the mean of the two wheel actions to both wheels (planar, LQR-equivalent DOF; no differential/yaw).",
 )
 parser.add_argument("--obs-dim", type=int, default=None, help="Expected policy observation size (checked if given).")
+parser.add_argument("--pulse-duration", type=float, default=0.05, help="Push duration (s).")
+parser.add_argument("--push-angle-deg", type=float, default=0.0, help="Push direction from the heading about +z (deg).")
+parser.add_argument("--forces", type=str, default=None, help="Comma-separated push forces (N); default: the LQR sweep.")
+parser.add_argument("--label", type=str, default="", help="Suffix for the output directory.")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 simulation_app = AppLauncher(args).app
@@ -52,6 +61,7 @@ import gymnasium as gym
 import torch
 
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
+from isaaclab.utils.math import quat_apply_inverse
 from isaaclab_tasks.utils import parse_env_cfg
 
 import tancho_v3_lab
@@ -60,7 +70,10 @@ import tancho_v3_lab.tasks  # noqa: F401
 
 # 0 N is the undisturbed standing (idle) case.
 FORCES_N = (0, 2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 34, 36, 38, 39, 40, 42, 45, 50, 60)
-PULSE_DURATION_S = 0.05
+if args.forces:
+    FORCES_N = tuple(float(v) for v in args.forces.split(","))
+PULSE_DURATION_S = args.pulse_duration
+PUSH_ANGLE_DEG = args.push_angle_deg
 FAILURE_PITCH_DEG = 15.0
 SETTLE_BAND_DEG = 1.0
 SETTLE_DWELL_S = 0.5
@@ -72,8 +85,11 @@ WHEEL_RADIUS_M = 0.03614  # wheel collision cylinder radius
 WHEEL_LIFTOFF_N = 0.5
 SLIP_THRESHOLD_M_S = 0.1
 HOME_TOLERANCE_M = 0.05
+HOME_DWELL_S = 0.5
 CHECK_TIME_S = 5.0
 BALANCE_BAND_DEG = 1.0
+IDLE_YAW_LIMIT_DEG = 5.0
+PUSH_YAW_LIMIT_DEG = 10.0
 
 
 def pitch_wxyz(quat: torch.Tensor) -> torch.Tensor:
@@ -139,8 +155,41 @@ def base_collision_points(urdf_path: Path) -> tuple[list[str], torch.Tensor, lis
     return names, torch.cat(points), owner
 
 
-def settling_time(rows: list[dict[str, float]]) -> float | None:
-    """First time after the pulse ends that |pitch - initial| stays within 1 deg for >= 0.5 s."""
+def dwell_time(rows: list[dict[str, float]], inside: list[bool]) -> tuple[float | None, int]:
+    """Settling time from push onset for a band condition held for SETTLE_DWELL_S.
+
+    Returns (time, left_band).  If the condition never fails, the response never
+    left the band: (0.0, 0).  Otherwise the search starts at the first exit and
+    returns the first time from which the condition holds for SETTLE_DWELL_S
+    (None if that never happens with enough data left).
+    """
+    first_out = next((i for i, ok in enumerate(inside) if not ok), None)
+    if first_out is None:
+        return 0.0, 0
+    for index in range(first_out, len(rows)):
+        end = rows[index]["time_s"] + SETTLE_DWELL_S
+        if rows[-1]["time_s"] < end - 1.0e-9:
+            return None, 1
+        if all(ok for row, ok in zip(rows[index:], inside[index:]) if row["time_s"] <= end + 1.0e-9):
+            return rows[index]["time_s"], 1
+    return None, 1
+
+
+def final_entry_time(rows: list[dict[str, float]], inside: list[bool]) -> float | None:
+    """Time after which the condition holds until the end of the run (>= SETTLE_DWELL_S of data left)."""
+    last_out = max((r["time_s"] for r, ok in zip(rows, inside) if not ok), default=None)
+    if last_out is None:
+        return 0.0
+    entry = next((r["time_s"] for r in rows if r["time_s"] > last_out), None)
+    if entry is None or rows[-1]["time_s"] < entry + SETTLE_DWELL_S - 1.0e-9:
+        return None
+    return entry
+
+
+def legacy_settling_time(rows: list[dict[str, float]]) -> float | None:
+    """Pre-2026-10-01 definition, kept for traceability: first time >= pulse end with
+    |pitch - initial| <= 1 deg for 0.5 s.  A push that never leaves the band returns
+    the pulse end (0.05 s), which is not a recovery time."""
     for index, row in enumerate(rows):
         if row["time_s"] < PULSE_DURATION_S - 1.0e-9:
             continue
@@ -151,17 +200,6 @@ def settling_time(rows: list[dict[str, float]]) -> float | None:
         if max(abs(item["pitch_dev_deg"]) for item in window) <= SETTLE_BAND_DEG:
             return row["time_s"]
     return None
-
-
-def final_settling_time(rows: list[dict[str, float]]) -> float | None:
-    """Last entry into the +-1 deg band after which the pitch never leaves it (>= 0.5 s of data left)."""
-    last_out = max((r["time_s"] for r in rows if abs(r["pitch_dev_deg"]) > SETTLE_BAND_DEG), default=None)
-    if last_out is None:
-        return PULSE_DURATION_S
-    entry = next((r["time_s"] for r in rows if r["time_s"] > last_out), None)
-    if entry is None or rows[-1]["time_s"] < entry + SETTLE_DWELL_S - 1.0e-9:
-        return None
-    return max(entry, PULSE_DURATION_S)
 
 
 def pulse_fraction(step: int, dt: float) -> float:
@@ -191,6 +229,27 @@ def main() -> None:
     command.ranges.lin_vel_x = (0.0, 0.0)
     command.ranges.lin_vel_y = (0.0, 0.0)
     command.ranges.ang_vel_z = (0.0, 0.0)
+    # Evaluation only: no training randomisation (nominal plant, clean observations).
+    disabled = []
+    for group in ("policy", "critic"):
+        group_cfg = getattr(cfg.observations, group, None)
+        if group_cfg is not None and getattr(group_cfg, "enable_corruption", False):
+            group_cfg.enable_corruption = False
+            disabled.append(f"observations.{group}.enable_corruption")
+    for action_name, action_cfg in cfg.actions.to_dict().items():
+        if isinstance(action_cfg, dict) and action_cfg.get("delay_probability"):
+            getattr(cfg.actions, action_name).delay_probability = 0.0
+            disabled.append(f"actions.{action_name}.delay_probability")
+    for event_name in ("add_base_mass", "randomize_com"):
+        if getattr(cfg.events, event_name, None) is not None:
+            setattr(cfg.events, event_name, None)
+            disabled.append(f"events.{event_name}")
+    friction = getattr(cfg.events, "randomize_friction", None)
+    if friction is not None:
+        friction.params["static_friction_range"] = (0.8, 0.8)
+        friction.params["dynamic_friction_range"] = (0.8, 0.8)
+        disabled.append("events.randomize_friction -> 0.8")
+    print(f"EVAL_RANDOMIZATION_OFF={disabled}", flush=True)
     env = gym.make(args.task, cfg=cfg)
     env = RslRlVecEnvWrapper(env, clip_actions=1.0)
     core = env.unwrapped
@@ -242,6 +301,11 @@ def main() -> None:
         shape_z = torch.full((len(FORCES_N), len(shape_names)), float("inf"), device=core.device)
         shape_z = shape_z.scatter_reduce(1, point_owner_t.expand_as(point_z), point_z, reduce="amin")
         lowest_z, lowest_shape = shape_z.min(dim=1)
+        rel = pos[:, :2] - pos0[:, :2]
+        heading0 = heading0_w[:, :2]
+        yaw = yaw_wxyz(quat)
+        yaw_change = torch.atan2(torch.sin(yaw - yaw0), torch.cos(yaw - yaw0))
+        qd = robot.data.joint_vel
         fields = {
             "pitch_deg": pitch[:, None],
             "yaw_deg": torch.rad2deg(yaw_wxyz(quat))[:, None],
@@ -250,6 +314,13 @@ def main() -> None:
             "base_y_m": pos[:, 1:2],
             "base_vx_m_s": robot.data.root_lin_vel_w[:, 0:1],
             "base_vy_m_s": robot.data.root_lin_vel_w[:, 1:2],
+            "displacement_m": torch.linalg.vector_norm(rel, dim=1, keepdim=True),
+            "forward_displacement_m": (rel * heading0).sum(dim=1, keepdim=True),
+            "forward_velocity_m_s": (robot.data.root_lin_vel_w[:, :2] * heading0).sum(dim=1, keepdim=True),
+            "odometry_displacement_m": WHEEL_RADIUS_M * (robot.data.joint_pos.mean(dim=1, keepdim=True) - wheel0),
+            "yaw_change_deg": torch.rad2deg(yaw_change)[:, None],
+            "yaw_rate_rad_s": robot.data.root_ang_vel_w[:, 2:3],
+            "wheel_speed_diff_rad_s": qd[:, 1:2] - qd[:, 0:1],
             "wheel_L_q_rad": robot.data.joint_pos[:, 0:1],
             "wheel_R_q_rad": robot.data.joint_pos[:, 1:2],
             "wheel_L_qd_rad_s": robot.data.joint_vel[:, 0:1],
@@ -298,6 +369,14 @@ def main() -> None:
         return rows_by_case
 
     zero_force = torch.zeros(len(FORCES_N), device=core.device)
+    pos0 = (robot.data.root_link_pos_w - core.scene.env_origins).clone()
+    yaw0 = yaw_wxyz(robot.data.root_link_quat_w).clone()
+    wheel0 = robot.data.joint_pos.mean(dim=1, keepdim=True).clone()
+    heading0_w = torch.stack((torch.cos(yaw0), torch.sin(yaw0), torch.zeros_like(yaw0)), dim=1)
+    push_angle = math.radians(PUSH_ANGLE_DEG)
+    push_dir_w = torch.stack(
+        (torch.cos(yaw0 + push_angle), torch.sin(yaw0 + push_angle), torch.zeros_like(yaw0)), dim=1
+    )
     pitch0_deg = torch.rad2deg(pitch_wxyz(robot.data.root_link_quat_w)).cpu().tolist()
     pitch0_t = torch.tensor(pitch0_deg, device=core.device)
     # Static balance pitch: rotate about the wheel axle until the whole-robot COM is
@@ -314,14 +393,17 @@ def main() -> None:
         # impulse is exactly F*0.05 N*s at the policy's own rate.
         fraction = pulse_fraction(step, dt)
         applied = force_levels * fraction
-        if step == 0 or fraction != pulse_fraction(step - 1, dt):
-            forces = torch.zeros((len(FORCES_N), 1, 3), device=core.device)
-            forces[:, 0, 0] = applied
-            robot.set_external_force_and_torque(
+        if fraction > 0.0 or pulse_fraction(step - 1, dt) > 0.0:
+            # World-fixed direction, converted with the current pose and applied in the link
+            # frame at the COM: the wrench composer's is_global path uses the link pose cached
+            # at the last reset.
+            force_w = applied[:, None] * push_dir_w
+            forces = quat_apply_inverse(robot.data.root_link_quat_w, force_w)[:, None, :].contiguous()
+            robot.permanent_wrench_composer.set_forces_and_torques(
                 forces=forces,
                 torques=torch.zeros_like(forces),
-                body_ids=body_ids,
-                is_global=True,
+                body_ids=torch.tensor(body_ids, dtype=torch.int32, device=core.device),
+                is_global=False,
             )
         with torch.inference_mode():
             # The exported TorchScript policy takes the flat policy tensor, not the wrapper's TensorDict.
@@ -340,7 +422,8 @@ def main() -> None:
 
     rows_by_case = make_rows(torch.stack(sample_batches).cpu().tolist())
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = args.output_dir.resolve() / f"trained_rl_lqr_axes_{stamp}"
+    suffix = f"_{args.label}" if args.label else ""
+    output_dir = args.output_dir.resolve() / f"trained_rl_lqr_axes_{stamp}{suffix}"
     output_dir.mkdir(parents=True, exist_ok=True)
     timeseries_path = output_dir / "trained_rl_push_timeseries.csv"
     fields = list(rows_by_case[0][0])
@@ -352,49 +435,72 @@ def main() -> None:
 
     summary_path = output_dir / "trained_rl_push_summary.csv"
     summary_fields = [
-        "controller", "push_force_N", "pulse_duration_s", "recovered", "max_pitch_deviation_deg",
-        "settling_time_s", "peak_wheel_torque_Nm", "wheel_torque_limit_Nm",
+        "controller", "push_force_N", "pulse_duration_s", "push_angle_deg", "recovered",
+        "max_pitch_deviation_deg", "max_abs_pitch_deg",
+        # Recovery times from push onset; 0 with *_left_band = 0 means the band was never left.
+        "settling_time_s", "pitch_left_band", "final_settling_time_s",
+        "pose_position_settling_time_s", "pose_position_left_band", "settling_time_legacy_s",
+        "peak_wheel_torque_Nm", "wheel_torque_limit_Nm",
         "torque_saturated", "first_saturation_time_s", "saturation_duration_s",
-        "saturation_before_failure_s", "failure_time_s", "final_settling_time_s",
+        "saturation_before_failure_s", "failure_time_s",
         "ground_contact", "first_ground_contact_time_s", "ground_contact_shape",
         "pitch_dev_at_first_ground_contact_deg", "ground_contact_duration_s",
         "max_wheel_speed_rad_s", "max_abs_slip_m_s", "first_slip_time_s",
         "first_wheel_liftoff_time_s", "wheel_liftoff_duration_s", "initial_pitch_deg",
         "balance_pitch_deg", "max_abs_pitch_from_balance_deg",
-        "max_displacement_m", "displacement_at_5s_m", "velocity_at_5s_m_s", "return_time_s",
-        "final_displacement_m", "returned_within_5s", "idle_pass", "max_abs_yaw_deg",
+        "max_displacement_m", "displacement_at_5s_m", "velocity_at_5s_m_s",
+        "return_time_s", "return_left_band", "return_time_final_s", "final_displacement_m",
+        "returned_within_5s", "max_abs_yaw_deg", "final_yaw_change_deg",
+        "max_abs_yaw_rate_rad_s", "max_abs_wheel_speed_diff_rad_s",
+        "idle_pass", "push_pass",
     ]
     with summary_path.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=summary_fields)
         writer.writeheader()
         for i, (level, case_rows, did_fail) in enumerate(zip(FORCES_N, rows_by_case, failed.tolist())):
-            settle = None if did_fail else settling_time(case_rows)
             tau = [max(abs(r["wheel_L_tau_Nm"]), abs(r["wheel_R_tau_Nm"])) for r in case_rows]
             sat = [t >= TORQUE_LIMIT_NM - SAT_TOL_NM for t in tau]
             contact_rows = [r for r in case_rows if r["ground_contact"] > 0.5]
             fail_t = next((r["time_s"] for r in case_rows if r["failed"] > 0.5), None)
-            final_settle = None if did_fail else final_settling_time(case_rows)
             slip_t = next((r["time_s"] for r in case_rows
                            if max(abs(r["wheel_L_slip_m_s"]), abs(r["wheel_R_slip_m_s"])) > SLIP_THRESHOLD_M_S), "")
             lift = [min(r["wheel_L_normal_force_N"], r["wheel_R_normal_force_N"]) < WHEEL_LIFTOFF_N for r in case_rows]
-            x0, y0 = case_rows[0]["base_x_m"], case_rows[0]["base_y_m"]
-            disp = [math.hypot(r["base_x_m"] - x0, r["base_y_m"] - y0) for r in case_rows]
+            disp = [r["displacement_m"] for r in case_rows]
             at_check = min(case_rows, key=lambda r: abs(r["time_s"] - CHECK_TIME_S))
-            # Return time: from then on the robot stays within HOME_TOLERANCE_M until the end of the run.
-            last_out = max((r["time_s"] for r, d in zip(case_rows, disp) if d > HOME_TOLERANCE_M), default=None)
-            if last_out is None:
-                return_t = 0.0
+            # Bands: pitch within +-1 deg of the static balance pitch; position within 5 cm of t = 0.
+            pitch_ok = [abs(r["pitch_deg"] - balance_deg[i]) <= SETTLE_BAND_DEG for r in case_rows]
+            home_ok = [d <= HOME_TOLERANCE_M for d in disp]
+            both_ok = [p and h for p, h in zip(pitch_ok, home_ok)]
+            if did_fail:
+                settle, left = None, 1
+                final_settle = both_t = None
+                both_left = 1
             else:
-                return_t = next((r["time_s"] for r in case_rows if r["time_s"] > last_out), None)
+                settle, left = dwell_time(case_rows, pitch_ok)
+                final_settle = final_entry_time(case_rows, pitch_ok)
+                both_t, both_left = dwell_time(case_rows, both_ok)
+            return_t, return_left = dwell_time(case_rows, home_ok)
+            return_final = final_entry_time(case_rows, home_ok)
             from_balance = max(abs(r["pitch_deg"] - balance_deg[i]) for r in case_rows)
+            max_yaw = max(abs(r["yaw_change_deg"]) for r in case_rows)
+            max_abs_pitch = max(abs(r["pitch_deg"]) for r in case_rows)
+            returned = return_t is not None and return_t <= CHECK_TIME_S
+            legacy = None if did_fail else legacy_settling_time(case_rows)
             writer.writerow(
                 {
                     "controller": "trained_rl",
                     "push_force_N": level,
                     "pulse_duration_s": PULSE_DURATION_S,
+                    "push_angle_deg": PUSH_ANGLE_DEG,
                     "recovered": int((not did_fail) and settle is not None),
                     "max_pitch_deviation_deg": max(abs(row["pitch_dev_deg"]) for row in case_rows),
+                    "max_abs_pitch_deg": max_abs_pitch,
                     "settling_time_s": "" if settle is None else settle,
+                    "pitch_left_band": left,
+                    "final_settling_time_s": "" if final_settle is None else final_settle,
+                    "pose_position_settling_time_s": "" if both_t is None else both_t,
+                    "pose_position_left_band": both_left,
+                    "settling_time_legacy_s": "" if legacy is None else legacy,
                     "peak_wheel_torque_Nm": max(tau),
                     "wheel_torque_limit_Nm": TORQUE_LIMIT_NM,
                     "torque_saturated": int(any(sat)),
@@ -403,7 +509,6 @@ def main() -> None:
                     "saturation_before_failure_s": round(dt * sum(
                         1 for r, s in zip(case_rows[1:], sat[1:]) if s and (fail_t is None or r["time_s"] <= fail_t)), 4),
                     "failure_time_s": "" if fail_t is None else fail_t,
-                    "final_settling_time_s": "" if final_settle is None else final_settle,
                     "ground_contact": int(bool(contact_rows)),
                     "first_ground_contact_time_s": contact_rows[0]["time_s"] if contact_rows else "",
                     "ground_contact_shape": contact_rows[0]["lowest_shape"] if contact_rows else "",
@@ -420,28 +525,43 @@ def main() -> None:
                     "balance_pitch_deg": balance_deg[i],
                     "max_abs_pitch_from_balance_deg": from_balance,
                     "max_displacement_m": max(disp),
-                    "displacement_at_5s_m": math.hypot(at_check["base_x_m"] - x0, at_check["base_y_m"] - y0),
+                    "displacement_at_5s_m": at_check["displacement_m"],
                     "velocity_at_5s_m_s": math.hypot(at_check["base_vx_m_s"], at_check["base_vy_m_s"]),
                     "return_time_s": "" if return_t is None else return_t,
+                    "return_left_band": return_left,
+                    "return_time_final_s": "" if return_final is None else return_final,
                     "final_displacement_m": disp[-1],
-                    "returned_within_5s": int(return_t is not None and return_t <= CHECK_TIME_S),
-                    "max_abs_yaw_deg": max(abs(r["yaw_deg"] - case_rows[0]["yaw_deg"]) for r in case_rows),
+                    "returned_within_5s": int(returned),
+                    "max_abs_yaw_deg": max_yaw,
+                    "final_yaw_change_deg": case_rows[-1]["yaw_change_deg"],
+                    "max_abs_yaw_rate_rad_s": max(abs(r["yaw_rate_rad_s"]) for r in case_rows),
+                    "max_abs_wheel_speed_diff_rad_s": max(abs(r["wheel_speed_diff_rad_s"]) for r in case_rows),
                     "idle_pass": "" if level != 0 else int(
-                        max(disp) < HOME_TOLERANCE_M and from_balance <= BALANCE_BAND_DEG),
+                        max(disp) < HOME_TOLERANCE_M and from_balance <= BALANCE_BAND_DEG
+                        and max_yaw < IDLE_YAW_LIMIT_DEG),
+                    "push_pass": "" if level == 0 else int(
+                        (not did_fail) and returned and max_abs_pitch <= FAILURE_PITCH_DEG
+                        and max_yaw < PUSH_YAW_LIMIT_DEG),
                 }
             )
     metadata = {
         "controller": "trained_rl",
         "checkpoint": str(checkpoint),
+        "task": args.task,
         "tancho_v3_lab_module": tancho_v3_lab.__file__,
         "urdf": str(urdf_path),
         "training_pose_rad": {"thigh": -0.50, "calf": 0.87},
         "push_forces_N": list(FORCES_N),
         "nominal_pulse_duration_s": PULSE_DURATION_S,
+        "push_angle_deg": PUSH_ANGLE_DEG,
+        "push_point": "base_link_root COM",
         "policy_dt_s": dt,
+        "sim_dt_s": float(cfg.sim.dt),
+        "decimation": int(cfg.decimation),
         "pulse_discretization": {
             "per_step_force_fraction": [pulse_fraction(k, dt) for k in range(math.ceil(PULSE_DURATION_S / dt) + 1)],
-            "note": "fraction = overlap of each policy step with the pulse window; exact F*0.05 impulse",
+            "impulse_per_newton_Ns": sum(pulse_fraction(k, dt) for k in range(math.ceil(PULSE_DURATION_S / dt) + 1)) * dt,
+            "note": "fraction = overlap of each policy step with the pulse window; exact F*T impulse",
         },
         "evaluation_overrides": {
             "terminations": "all removed (no auto reset)",
@@ -449,15 +569,27 @@ def main() -> None:
             "ground_contact": f"base_link_root net contact force > {GROUND_CONTACT_THRESHOLD_N} N, logged only",
             "curriculum": None,
             "push_robot_event": None,
+            "randomization_off": disabled,
         },
         "base_collision_shapes": shape_names,
         "duration_s": args.duration,
         "symmetric_actions": args.symmetric_actions,
-        "position_metrics": {
+        "metrics": {
             "displacement": "horizontal distance of the root link from its t=0 position",
-            "return_time_s": f"time after which displacement stays <= {HOME_TOLERANCE_M} m to the end of the run",
-            "idle_pass": f"0 N case: max displacement < {HOME_TOLERANCE_M} m and |pitch - balance| <= "
-                         f"{BALANCE_BAND_DEG} deg for the whole run",
+            "settling_time_s": f"from push onset: first time after the first exit from |pitch - balance| <= "
+                               f"{SETTLE_BAND_DEG} deg from which it holds for {SETTLE_DWELL_S} s; "
+                               "0 with pitch_left_band=0 if the band was never left",
+            "final_settling_time_s": "last entry into the pitch band, staying until the end of the run",
+            "pose_position_settling_time_s": f"as settling_time_s for pitch band AND displacement <= "
+                                             f"{HOME_TOLERANCE_M} m",
+            "settling_time_legacy_s": "old definition (search starts at pulse end, band around the initial pitch): "
+                                      "a push that never leaves the band reports the pulse end (0.05 s)",
+            "return_time_s": f"as settling_time_s for displacement <= {HOME_TOLERANCE_M} m held {HOME_DWELL_S} s",
+            "return_time_final_s": f"time after which displacement stays <= {HOME_TOLERANCE_M} m to the end",
+            "idle_pass": f"0 N: max displacement < {HOME_TOLERANCE_M} m, |pitch - balance| <= {BALANCE_BAND_DEG} deg "
+                         f"and |yaw change| < {IDLE_YAW_LIMIT_DEG} deg for the whole run",
+            "push_pass": f"no failure, return_time_s <= {CHECK_TIME_S} s, max |pitch| <= {FAILURE_PITCH_DEG} deg, "
+                         f"max |yaw change| < {PUSH_YAW_LIMIT_DEG} deg",
             "balance_pitch": "pitch at which the whole-robot COM is above the wheel axle",
         },
         "plot_major_tick_s": 0.5,
