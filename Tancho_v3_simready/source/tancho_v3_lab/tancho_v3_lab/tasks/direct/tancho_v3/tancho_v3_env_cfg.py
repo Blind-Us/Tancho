@@ -4,7 +4,7 @@
 --------
 1. 目前以平地直立站穩為目標；保留速度追蹤與 curriculum term，以零權重或門檻停用。
 2. 只有輪子可以接地；base/thigh/calf 接地會強懲罰並終止，避免趴地刷分。
-3. 現役 nominal pose 由 reset 共用資料定義：thigh=-0.50 rad、calf=+0.87 rad。
+3. 現役 nominal pose 由 reset 共用資料定義；角度可改，root Z 會按當次 q 重新計算。
 4. Reset 高度由 URDF joint FK 與輪子 collision support geometry 計算，不假設 mesh origin 為關節軸心。
 """
 from pathlib import Path
@@ -36,11 +36,10 @@ URDF_PATH = str(ASSET_DIR / "urdf" / "Tancho_v3.urdf")
 # -- 站姿參數 ---------------------------------------------------------------
 STAND_THIGH = ce.NOMINAL_JOINT_POSITIONS["joint_thigh_L"]
 STAND_CALF = ce.NOMINAL_JOINT_POSITIONS["joint_calf_L"]
-RESET_ROOT_HEIGHT = ce.TARGET_ROOT_HEIGHT_M
-# Gate B nominal wheel-ground reset geometry on flat terrain.  Keep the reward
-# target tied to the same URDF-derived value used by reset so an asset update
-# cannot leave behind a stale hard-coded height.
-BASE_HEIGHT_TARGET = RESET_ROOT_HEIGHT
+# Scene construction needs a finite seed pose before reset events run.  This
+# is computed from the default q for spawning only; every episode reset
+# recomputes root Z from that environment's actual sampled q.
+INITIAL_SPAWN_ROOT_HEIGHT = ce.compute_reset_root_height(ce.NOMINAL_JOINT_POSITIONS)
 IMU_POS_ROOT = (-0.00835741999, 0.0000000160456, -0.0294337942)
 IMU_ROT_ROOT = (0.707106781, 0.707106781, 0.0, 0.0)
 PPO_STEPS_PER_ITERATION = 24
@@ -79,7 +78,7 @@ class TanchoV3SceneCfg(InteractiveSceneCfg):
             activate_contact_sensors=True,
         ),
         init_state=ArticulationCfg.InitialStateCfg(
-            pos=(0.0, 0.0, RESET_ROOT_HEIGHT),
+            pos=(0.0, 0.0, INITIAL_SPAWN_ROOT_HEIGHT),
             rot=(1.0, 0.0, 0.0, 0.0),
             joint_pos={
                 "joint_thigh_L": STAND_THIGH,
@@ -96,16 +95,18 @@ class TanchoV3SceneCfg(InteractiveSceneCfg):
             "legs": ImplicitActuatorCfg(
                 joint_names_expr=["joint_thigh_L", "joint_calf_L",
                                   "joint_thigh_R", "joint_calf_R"],
-                stiffness=100,
-                damping=2.0,
+                # DM-J4310 position loop setting used by the hardware team.
+                stiffness=20.0,
+                damping=0.2,
                 effort_limit_sim=12.5,
                 velocity_limit_sim=12.5,
             ),
-            # 輪子 2 關節：MDP effort action
+            # DM-H3510 使用速度模式。手冊指定 Kp=0、Kd 非零，並建議速度環
+            # 阻尼因子 4.0；因此不能再用雙零增益配直接 torque command。
             "wheels": ImplicitActuatorCfg(
                 joint_names_expr=["joint_wheel_L", "joint_wheel_R"],
                 stiffness=0.0,
-                damping=0.0,
+                damping=4.0,
                 effort_limit_sim=0.45,
                 velocity_limit_sim=188,
             ),
@@ -127,23 +128,24 @@ class TanchoV3SceneCfg(InteractiveSceneCfg):
 
 @configclass
 class ActionsCfg:
-    """動作空間：腿部位置 + 輪子力矩（皆使用 Isaac Lab MDP action term）。"""
+    """動作空間：腿部位置 + DM-H3510 輪速目標（Isaac Lab 官方 MDP）。"""
     
     joint_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"],
-        # 限制策略每一維腿部 action 的最大目標偏移為 +/-0.10 rad。
-        # 避免 Kp=100 Nm/rad 時，單拍約 0.23 rad 的 target jump 直接觸發 12.5 Nm 飽和。
-        scale=0.1,
+        # 每一維腿部 action 最多偏移 +/-0.25 rad。依實驗基準固定，不以調小
+        # action scale 取代 action-rate regularization。
+        scale=0.25,
         use_default_offset=True,
         preserve_order=True,
     )
-    # 實測 velocity target 在倒地前幾乎無法改變輪心位置；直接力矩可恢復控制權。
-    # 名稱維持 joint_vel，以保持既有 checkpoint/action ordering 與監控腳本相容。
-    joint_vel = mdp.JointEffortActionCfg(
+    # DM-H3510 額定轉速 500 rpm = 52.36 rad/s。policy 輸出速度目標，馬達
+    # 內部速度迴路再在 +/-0.45 Nm 物理上限內產生力矩。
+    joint_vel = mdp.JointVelocityActionCfg(
         asset_name="robot",
         joint_names=["joint_wheel_L", "joint_wheel_R"],
-        scale=0.45,
+        scale=52.3598776,
+        use_default_offset=True,
     )
 
 
@@ -168,17 +170,55 @@ class CommandsCfg:
 
 @configclass
 class ObservationsCfg:
-    """觀測空間。"""
+    """Tancho 站立狀態；不輸入會無界累積的連續 wheel angle。"""
 
     @configclass
     class PolicyCfg(ObsGroup):
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel, scale=2.0)
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=0.25)
+        base_ang_vel = ObsTerm(
+            func=mdp.imu_ang_vel,
+            scale=0.25,
+            params={"asset_cfg": SceneEntityCfg("imu")},
+        )
         base_pos_z = ObsTerm(func=mdp.base_pos_z, scale=1.0)  
-        projected_gravity = ObsTerm(func=mdp.projected_gravity)
+        projected_gravity = ObsTerm(
+            func=mdp.imu_projected_gravity,
+            params={"asset_cfg": SceneEntityCfg("imu")},
+        )
         velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"})
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel, scale=0.1)
-        joint_vel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05)
+        leg_joint_pos = ObsTerm(
+            func=mdp.joint_pos_rel,
+            scale=0.1,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"],
+                    preserve_order=True,
+                )
+            },
+        )
+        leg_joint_vel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            scale=0.05,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"],
+                    preserve_order=True,
+                )
+            },
+        )
+        wheel_joint_vel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            scale=0.05,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=["joint_wheel_L", "joint_wheel_R"],
+                    preserve_order=True,
+                )
+            },
+        )
         actions = ObsTerm(func=mdp.last_action)
 
         def __post_init__(self):

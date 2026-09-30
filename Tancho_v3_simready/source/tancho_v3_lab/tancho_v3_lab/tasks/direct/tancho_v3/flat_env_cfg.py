@@ -1,5 +1,3 @@
-import math
-
 import isaaclab.envs.mdp as mdp
 import isaaclab.sim as sim_utils
 from isaaclab.envs import ManagerBasedRLEnvCfg
@@ -16,7 +14,6 @@ from . import custom_events as ce
 from . import custom_rewards as cr
 from .tancho_v3_env_cfg import (
     ActionsCfg,
-    BASE_HEIGHT_TARGET,
     CommandsCfg,
     CurriculumCfg,
     EventCfg,
@@ -44,111 +41,121 @@ def make_flat_terrain() -> TerrainImporterCfg:
 
 @configclass
 class FlatRewardsCfg:
-        # 1. 活著就給正獎勵
+        """Tancho-specific standing objective built from physical state errors.
+
+        Official Isaac Lab MDP terms are used wherever possible.  The only
+        custom terms are whole-robot capture-point error and bilateral leg
+        symmetry, neither of which has an official equivalent.
+        """
+
+        # At 50 Hz Isaac Lab multiplies this weight by step_dt=0.02, so a
+        # non-timeout fall contributes -4.0 while a full 20 s survival earns
+        # +20 from the alive term.  This makes falling unambiguously worse
+        # without overwhelming all dense physical feedback.
+        termination_penalty = RewardTerm(
+            func=mdp.is_terminated,
+            weight=-200.0,
+        )
         is_alive = RewardTerm(
             func=mdp.is_alive,
             weight=1.0,
         )
 
-        # 2. 機身保持直立
-        # theta -> 0
+        # Balance state: body tilt and pitch/roll rate approach zero.
         upright = RewardTerm(
             func=mdp.flat_orientation_l2,
             weight=-5.0,
-            params={
-                "asset_cfg": SceneEntityCfg("robot"),
-            },
+            params={"asset_cfg": SceneEntityCfg("robot")},
         )
-
-        # 3. 降低 pitch / roll angular velocity
-        # theta_dot -> 0
         ang_vel = RewardTerm(
             func=mdp.ang_vel_xy_l2,
-            weight=-0.5,
-            params={
-                "asset_cfg": SceneEntityCfg("robot"),
-            },
+            weight=-0.05,
+            params={"asset_cfg": SceneEntityCfg("robot")},
         )
 
-        # 4. 追蹤零 yaw-rate，避免左右輪輸出不一致造成原地打轉
+        # The standing command is exactly zero longitudinal/lateral/yaw speed.
         ang_vel_z = RewardTerm(
             func=mdp.track_ang_vel_z_exp,
-            weight=0.5,
-            params={
-                "command_name": "base_velocity",
-                "std": math.sqrt(0.25),
-            },
+            weight=1.0,
+            params={"command_name": "base_velocity", "std": 0.5},
         )
-
-        # 5. 追蹤零水平速度，讓平衡後仍持續滾動的機器人回到靜止
         lin_vel = RewardTerm(
             func=mdp.track_lin_vel_xy_exp,
-            weight=0.5,
-            params={
-                "command_name": "base_velocity",
-                "std": math.sqrt(0.25),
-            },
+            weight=2.0,
+            params={"command_name": "base_velocity", "std": 0.5},
+        )
+        vertical_velocity = RewardTerm(
+            func=mdp.lin_vel_z_l2,
+            weight=-1.0,
+            params={"asset_cfg": SceneEntityCfg("robot")},
         )
 
-        # 6. 官方 MDP 無 whole-body COM 到輪軸線距離，保留 Tancho 自訂項目
-        wheel_under_com = RewardTerm(
-            func=cr.wheel_under_com_l2,
-            weight=-0.02,
+        # One dynamic balance objective only: at rest the axle tracks COM;
+        # during motion it tracks the velocity-shifted capture point.  The
+        # 50-mm normalization prevents this term from overwhelming survival,
+        # posture, settling, energy, and safety objectives.
+        capture_point = RewardTerm(
+            func=cr.wheel_capture_point_l2,
+            weight=-0.5,
             params={
                 "asset_cfg": SceneEntityCfg("robot"),
                 "left_wheel_body": "wheel_L",
                 "right_wheel_body": "wheel_R",
                 "com_body_name": None,
-                "error_scale": 0.015,
+                "error_scale": 0.050,
+                "wheel_radius": 0.03614,
+                "gravity_magnitude": 9.81,
+                "minimum_com_height": 0.05,
+                "max_capture_offset": 0.12,
             },
         )
 
-        # 7. wheel torque 不要長時間打滿
-        torque = RewardTerm(
+        # Tancho is mechanically symmetric; equal physical pose uses equal q.
+        mirror = RewardTerm(func=cr.mirror_leg_l2, weight=-0.5)
+
+        # Normalize torque cost by each motor's squared peak torque.  Therefore
+        # 100% wheel and 100% leg utilization have the same per-joint cost;
+        # the large numerical difference between 0.45 and 12.5 Nm cannot bias
+        # the optimizer toward one actuator family merely because of units.
+        wheel_torque = RewardTerm(
             func=mdp.joint_torques_l2,
-            weight=-1.0e-4,
+            weight=-0.049382716,  # -0.01 / (0.45 Nm)^2
             params={
-                "asset_cfg": SceneEntityCfg(
-                    "robot",
-                    joint_names=[
-                        "joint_wheel_L",
-                        "joint_wheel_R",
-                    ],
-                ),
+                "asset_cfg": SceneEntityCfg("robot", joint_names=["joint_wheel_L", "joint_wheel_R"]),
             },
         )
-
-        # 8. leg torque 不要長時間打滿 12.5 Nm
         leg_torque = RewardTerm(
             func=mdp.joint_torques_l2,
-            weight=-1.0e-4,
+            weight=-0.000064,  # -0.01 / (12.5 Nm)^2
             params={
                 "asset_cfg": SceneEntityCfg(
                     "robot",
-                    joint_names=[
-                        "joint_thigh_L",
-                        "joint_calf_L",
-                        "joint_thigh_R",
-                        "joint_calf_R",
-                    ],
+                    joint_names=["joint_thigh_.*", "joint_calf_.*"],
                 ),
             },
         )
-
-        # 9. 抑制相鄰 control step 的動作跳變，避免 reset 後立即跳到大角度目標。
         action_rate = RewardTerm(
             func=mdp.action_rate_l2,
-            weight=-1.0e-3,
+            weight=-0.01,
         )
-
-        # 10. 防止機身保持水平卻整體下蹲到觸地。
-        # Flat terrain 目標高度來自 Gate B 的 nominal wheel-ground reset geometry。
-        base_height = RewardTerm(
-            func=mdp.base_height_l2,
-            weight=-100.0,
+        joint_acceleration = RewardTerm(
+            func=mdp.joint_acc_l2,
+            weight=-2.5e-7,
+            params={"asset_cfg": SceneEntityCfg("robot")},
+        )
+        leg_position_limits = RewardTerm(
+            func=mdp.joint_pos_limits,
+            weight=-10.0,
             params={
-                "target_height": BASE_HEIGHT_TARGET,
-                "asset_cfg": SceneEntityCfg("robot"),
+                "asset_cfg": SceneEntityCfg("robot", joint_names=["joint_thigh_.*", "joint_calf_.*"]),
+            },
+        )
+        wheel_velocity_limits = RewardTerm(
+            func=mdp.joint_vel_limits,
+            weight=-1.0,
+            params={
+                "soft_ratio": 0.9,
+                "asset_cfg": SceneEntityCfg("robot", joint_names=["joint_wheel_.*"]),
             },
         )
 
@@ -198,7 +205,9 @@ class TanchoV3FlatEnvCfg(ManagerBasedRLEnvCfg):
     curriculum: CurriculumCfg = CurriculumCfg()
 
     def __post_init__(self):
-        self.decimation = 2
+        # 200 Hz PhysX integration, 50 Hz policy/action update.  The 0.25-rad
+        # leg action scale is defined at this hardware-aligned control period.
+        self.decimation = 4
         self.episode_length_s = 20.0
         self.sim.dt = 0.005
 

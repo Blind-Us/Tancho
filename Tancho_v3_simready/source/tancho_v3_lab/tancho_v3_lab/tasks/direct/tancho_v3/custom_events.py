@@ -25,11 +25,11 @@ FIXED_URDF_PATH = _ASSET_DIR / "urdf" / "Tancho_v3_fixed.urdf"
 # the values used by the FK pass below, so the pose and height calculation stay
 # tied to the same state that is written into Isaac Lab.
 NOMINAL_JOINT_POSITIONS: Mapping[str, float] = {
-    "joint_thigh_L": -0.50,
-    "joint_calf_L": 0.87,
+    "joint_thigh_L": -0.2,
+    "joint_calf_L": 0.3,
     "joint_wheel_L": 0.0,
-    "joint_thigh_R": -0.50,
-    "joint_calf_R": 0.87,
+    "joint_thigh_R": -0.2,
+    "joint_calf_R": 0.3,
     "joint_wheel_R": 0.0,
 }
 WHEEL_LINK_NAMES = ("wheel_L", "wheel_R")
@@ -50,16 +50,25 @@ class TanchoResetGeometry:
     wheel_support_distance_m: tuple[float, ...]
 
     @property
+    def required_root_height_m(self) -> tuple[float, ...]:
+        """Root-Z required by each wheel on a zero-height support plane.
+
+        The value is computed from the wheel pose and the canonical round
+        tire collider.  Keeping the per-wheel values available is important
+        for rough terrain, where a single root height may need to satisfy
+        two different local support heights.
+        """
+
+        return tuple(
+            -center[2] + support
+            for center, support in zip(self.wheel_center_rel_root_m, self.wheel_support_distance_m)
+        )
+
+    @property
     def target_root_height_m(self) -> float:
         """Root height above a zero-height plane for the lower wheel support."""
 
-        return (
-            max(
-                -center[2] + support
-                for center, support in zip(self.wheel_center_rel_root_m, self.wheel_support_distance_m)
-            )
-            - RESET_CONTACT_PRELOAD_M
-        )
+        return max(self.required_root_height_m) - RESET_CONTACT_PRELOAD_M
 
     @property
     def wheel_gap_m(self) -> tuple[float, ...]:
@@ -293,6 +302,104 @@ def _wheel_poses_relative_to_root(
     return tuple(poses)
 
 
+def _wheel_support_geometry_from_urdf(
+    urdf_root: ET.Element,
+    urdf_path: Path,
+    joint_positions: Mapping[str, float],
+    wheel_support_radius: float | None = None,
+) -> TanchoResetGeometry:
+    """Build wheel support geometry for one exact URDF joint configuration.
+
+    ``joint_positions`` is deliberately a mapping of actual joint values, not
+    a nominal pose.  The helper is pure with respect to the simulator and is
+    therefore also used by the reset diagnostics.  Wheel support uses the
+    canonical cylinder collider from the URDF; the TPU mesh remains visual
+    metadata only.
+    """
+
+    poses = _wheel_poses_relative_to_root(urdf_root, joint_positions)
+    support_distances: list[float] = []
+    for wheel_link_name, (_, link_rotation) in zip(WHEEL_LINK_NAMES, poses):
+        link = urdf_root.find(f"link[@name='{wheel_link_name}']")
+        if link is None:
+            raise RuntimeError(f"URDF is missing required wheel link {wheel_link_name!r}")
+        support_distances.append(_round_tire_support_distance(link, link_rotation))
+
+    if max(support_distances) - min(support_distances) > 1.0e-5:
+        raise RuntimeError(
+            "Left/right wheel collision support distances disagree by more than 0.01 mm: "
+            f"{support_distances}"
+        )
+    return TanchoResetGeometry(
+        wheel_center_rel_root_m=tuple(pose[0] for pose in poses),
+        wheel_support_radius_m=(
+            _wheel_support_radius(urdf_path, urdf_root)
+            if wheel_support_radius is None
+            else float(wheel_support_radius)
+        ),
+        wheel_support_distance_m=tuple(support_distances),
+    )
+
+
+def compute_wheel_support_geometry(
+    joint_positions: Mapping[str, float] | None = None,
+    *,
+    fixed_asset: bool = False,
+) -> TanchoResetGeometry:
+    """Compute support geometry for one reset pose from URDF FK.
+
+    This public, simulator-free helper is the source of truth for the event
+    and for kinematic reset tests.  Omitting ``joint_positions`` selects the
+    configured nominal pose.  It always derives the result from the supplied
+    joint pose; no module-level root-height constant participates in reset.
+    """
+
+    if fixed_asset:
+        # The fixed wheel-only articulation has no thigh/calf joints.  The
+        # geometry is loaded below the dynamic asset and is independent of
+        # the optional wheel phase because the tire is round.
+        return FIXED_RESET_GEOMETRY
+
+    positions = dict(NOMINAL_JOINT_POSITIONS)
+    if joint_positions is not None:
+        positions.update({name: float(value) for name, value in joint_positions.items()})
+    return _wheel_support_geometry_from_urdf(
+        ET.parse(URDF_PATH).getroot(), URDF_PATH, positions
+    )
+
+
+def compute_reset_root_height(
+    joint_positions: Mapping[str, float] | None = None,
+    terrain_height: float = 0.0,
+    terrain_height_per_wheel: Sequence[float] | None = None,
+    *,
+    fixed_asset: bool = False,
+) -> float:
+    """Return the FK-derived root Z for one reset pose.
+
+    ``terrain_height_per_wheel`` is an optional two-value extension for local
+    left/right support heights.  A scalar ``terrain_height`` is the flat
+    terrain path and is preserved for existing callers.
+    """
+
+    geometry = compute_wheel_support_geometry(joint_positions, fixed_asset=fixed_asset)
+    if terrain_height_per_wheel is None:
+        terrain = (float(terrain_height), float(terrain_height))
+    else:
+        terrain = tuple(float(value) for value in terrain_height_per_wheel)
+        if len(terrain) != 2:
+            raise ValueError("terrain_height_per_wheel must contain exactly left and right heights")
+    return max(
+        required + local_height
+        for required, local_height in zip(geometry.required_root_height_m, terrain)
+    ) - RESET_CONTACT_PRELOAD_M
+
+
+# Alias with an explicit name for diagnostics and downstream callers that use
+# the phrase "root height from q".
+compute_root_height_from_joint_positions = compute_reset_root_height
+
+
 def canonical_wheel_support_height(wheel_phase_rad: float) -> float:
     """Evaluate the phase-invariant support height of the round tire collider."""
 
@@ -334,7 +441,6 @@ RESET_GEOMETRY = _load_reset_geometry()
 WHEEL_CENTER_REL_ROOT_M = RESET_GEOMETRY.wheel_center_rel_root_m
 WHEEL_SUPPORT_RADIUS_M = RESET_GEOMETRY.wheel_support_radius_m
 WHEEL_SUPPORT_DISTANCE_M = RESET_GEOMETRY.wheel_support_distance_m
-TARGET_ROOT_HEIGHT_M = RESET_GEOMETRY.target_root_height_m
 RESET_METADATA = {
     "urdf_path": str(URDF_PATH),
     "nominal_joint_positions_rad": dict(NOMINAL_JOINT_POSITIONS),
@@ -345,7 +451,7 @@ RESET_METADATA = {
     "wheel_collision_radius_m": WHEEL_SUPPORT_RADIUS_M,
     "canonical_tpu_visual_mesh": CANONICAL_TPU_MESH,
     "contact_preload_m": RESET_CONTACT_PRELOAD_M,
-    "target_root_height_m": TARGET_ROOT_HEIGHT_M,
+    "computed_root_height_m": RESET_GEOMETRY.target_root_height_m,
     "wheel_gap_m": RESET_GEOMETRY.wheel_gap_m,
 }
 
@@ -535,27 +641,82 @@ def visualize_tancho_directions(env, env_ids, asset_name: str = "robot"):
     visualizers["policy"].visualize(arrow_origin, arrow_quaternion(policy_xy), policy_scale)
 
 
-def get_reset_metadata(terrain_height: float = 0.0) -> dict[str, Any]:
+def get_reset_metadata(
+    terrain_height: float = 0.0,
+    joint_positions: Mapping[str, float] | None = None,
+    terrain_height_per_wheel: Sequence[float] | None = None,
+    *,
+    fixed_asset: bool = False,
+) -> dict[str, Any]:
     """Return reset geometry metadata for diagnostics.
 
-    ``terrain_height`` is the support-plane height in simulation/world Z.  The
-    returned values are plain Python values so diagnostics can serialize them
-    without depending on torch.
+    ``terrain_height`` is the flat support-plane height in simulation/world Z.
+    ``terrain_height_per_wheel`` reserves the API for left/right local terrain
+    heights.  The returned values are plain Python values so diagnostics can
+    serialize them without depending on torch.
     """
 
+    geometry = compute_wheel_support_geometry(joint_positions, fixed_asset=fixed_asset)
+    if terrain_height_per_wheel is None:
+        local_heights = (float(terrain_height), float(terrain_height))
+    else:
+        local_heights = tuple(float(value) for value in terrain_height_per_wheel)
+        if len(local_heights) != 2:
+            raise ValueError("terrain_height_per_wheel must contain exactly left and right heights")
+    target_root_height = max(
+        required + height
+        for required, height in zip(geometry.required_root_height_m, local_heights)
+    ) - RESET_CONTACT_PRELOAD_M
+    wheel_gaps = tuple(
+        target_root_height + center[2] - terrain - support
+        for center, terrain, support in zip(
+            geometry.wheel_center_rel_root_m,
+            local_heights,
+            geometry.wheel_support_distance_m,
+        )
+    )
     return {
         **RESET_METADATA,
+        "urdf_path": str(FIXED_URDF_PATH if fixed_asset else URDF_PATH),
+        "nominal_joint_positions_rad": dict(NOMINAL_JOINT_POSITIONS if not fixed_asset else FIXED_NOMINAL_JOINT_POSITIONS),
+        "wheel_center_rel_root_m": geometry.wheel_center_rel_root_m,
+        "wheel_support_radius_m": geometry.wheel_support_radius_m,
+        "wheel_support_distance_m": geometry.wheel_support_distance_m,
         "terrain_height_m": float(terrain_height),
-        "target_root_height_m": float(TARGET_ROOT_HEIGHT_M + terrain_height),
+        "terrain_height_per_wheel_m": local_heights,
+        "required_root_height_m": tuple(
+            required + height
+            for required, height in zip(geometry.required_root_height_m, local_heights)
+        ),
+        "computed_root_height_m": float(target_root_height),
+        "wheel_gap_m": wheel_gaps,
     }
 
 
-def compute_wheel_clearance(root_height: float, terrain_height: float = 0.0) -> tuple[float, ...]:
+def compute_wheel_clearance(
+    root_height: float,
+    terrain_height: float = 0.0,
+    joint_positions: Mapping[str, float] | None = None,
+    terrain_height_per_wheel: Sequence[float] | None = None,
+    *,
+    fixed_asset: bool = False,
+) -> tuple[float, ...]:
     """Compute each wheel's vertical clearance above the support plane."""
 
+    geometry = compute_wheel_support_geometry(joint_positions, fixed_asset=fixed_asset)
+    if terrain_height_per_wheel is None:
+        local_heights = (float(terrain_height), float(terrain_height))
+    else:
+        local_heights = tuple(float(value) for value in terrain_height_per_wheel)
+        if len(local_heights) != 2:
+            raise ValueError("terrain_height_per_wheel must contain exactly left and right heights")
     return tuple(
-        float(root_height + center[2] - terrain_height - support)
-        for center, support in zip(WHEEL_CENTER_REL_ROOT_M, WHEEL_SUPPORT_DISTANCE_M)
+        float(root_height + center[2] - terrain - support)
+        for center, terrain, support in zip(
+            geometry.wheel_center_rel_root_m,
+            local_heights,
+            geometry.wheel_support_distance_m,
+        )
     )
 
 
@@ -575,6 +736,52 @@ def terrain_height_from_env_origins(env: Any, env_ids: Any, root_xy: Any = None)
     return env.scene.env_origins[env_ids, 2]
 
 
+def _resolve_terrain_heights(
+    env: Any,
+    env_ids: Any,
+    root_xy: Any,
+    terrain_height: Any,
+    terrain_height_fn: TerrainHeightFn | None,
+    terrain_height_per_wheel: Any = None,
+    *,
+    device: Any,
+    dtype: Any,
+):
+    import torch
+
+    if terrain_height_per_wheel is not None:
+        value = terrain_height_per_wheel
+    else:
+        value = terrain_height_fn(env, env_ids, root_xy) if terrain_height_fn is not None else terrain_height
+    if value is None:
+        raise ValueError("terrain_height_fn returned None; return one height per environment")
+    heights = torch.as_tensor(value, device=device, dtype=dtype)
+    if heights.ndim == 0:
+        heights = heights.expand(len(env_ids), 2)
+    elif heights.ndim == 1:
+        # A pair is unambiguous for one selected environment when the
+        # per-wheel extension is used explicitly (or a callback returns it).
+        if len(env_ids) == 1 and heights.numel() == 2:
+            heights = heights.reshape(1, 2)
+        elif heights.shape == (len(env_ids),):
+            heights = heights.reshape(-1, 1).expand(-1, 2)
+        else:
+            raise ValueError(
+                "terrain_height must be a scalar, one value per environment, or per-wheel Nx2 values; "
+                f"received shape {tuple(heights.shape)} for {len(env_ids)} environments"
+            )
+    elif heights.ndim == 2 and heights.shape[-1] == 1:
+        heights = heights.expand(-1, 2)
+    if heights.shape != (len(env_ids), 2):
+        raise ValueError(
+            "terrain_height must be a scalar, one value per environment, or per-wheel Nx2 values; "
+            f"received shape {tuple(heights.shape)} for {len(env_ids)} environments"
+        )
+    if not bool(torch.isfinite(heights).all().item()):
+        raise ValueError("terrain heights must be finite")
+    return heights
+
+
 def _resolve_terrain_height(
     env: Any,
     env_ids: Any,
@@ -585,22 +792,17 @@ def _resolve_terrain_height(
     device: Any,
     dtype: Any,
 ):
-    import torch
+    """Backward-compatible scalar-height resolver returning the left column."""
 
-    value = terrain_height_fn(env, env_ids, root_xy) if terrain_height_fn is not None else terrain_height
-    if value is None:
-        raise ValueError("terrain_height_fn returned None; return one height per environment")
-    heights = torch.as_tensor(value, device=device, dtype=dtype)
-    if heights.ndim == 0:
-        heights = heights.expand(len(env_ids))
-    elif heights.ndim == 2 and heights.shape[-1] == 1:
-        heights = heights.squeeze(-1)
-    if heights.shape != (len(env_ids),):
-        raise ValueError(
-            "terrain_height must be a scalar or a tensor with one value per reset environment; "
-            f"received shape {tuple(heights.shape)} for {len(env_ids)} environments"
-        )
-    return heights
+    return _resolve_terrain_heights(
+        env,
+        env_ids,
+        root_xy,
+        terrain_height,
+        terrain_height_fn,
+        device=device,
+        dtype=dtype,
+    )[:, 0]
 
 
 def _set_gravity_compensation_fraction(
@@ -642,6 +844,178 @@ def _set_gravity_compensation_fraction(
     env.tancho_gravity_ramp_fraction[env_ids] = fraction
 
 
+def _as_reset_env_vector(value: Any, count: int, *, device: Any, dtype: Any, name: str):
+    """Convert a scalar or one-value-per-env reset argument to a tensor."""
+
+    import torch
+
+    values = torch.as_tensor(value, device=device, dtype=dtype)
+    if values.ndim == 0:
+        values = values.expand(count)
+    elif values.ndim == 2 and values.shape[-1] == 1:
+        values = values.squeeze(-1)
+    if values.shape != (count,):
+        raise ValueError(
+            f"{name} must be a scalar or one value per selected environment; "
+            f"received shape {tuple(values.shape)} for {count} environments"
+        )
+    if not bool(torch.isfinite(values).all().item()):
+        raise ValueError(f"{name} must contain only finite values")
+    return values
+
+
+def _resolve_reset_angle(
+    value: Any,
+    angle_range: Sequence[float] | None,
+    default: float,
+    count: int,
+    *,
+    device: Any,
+    dtype: Any,
+    name: str,
+):
+    """Resolve deterministic or explicitly sampled per-env reset angles."""
+
+    import torch
+
+    if value is not None and angle_range is not None:
+        raise ValueError(f"Specify either {name} or {name}_range, not both")
+    if value is not None:
+        return _as_reset_env_vector(value, count, device=device, dtype=dtype, name=name)
+    if angle_range is None:
+        return torch.full((count,), float(default), device=device, dtype=dtype)
+    bounds = tuple(float(item) for item in angle_range)
+    if len(bounds) != 2 or not all(math.isfinite(item) for item in bounds):
+        raise ValueError(f"{name}_range must be a finite (min, max) pair")
+    if bounds[0] > bounds[1]:
+        raise ValueError(f"{name}_range min must not exceed max")
+    return torch.empty((count,), device=device, dtype=dtype).uniform_(bounds[0], bounds[1])
+
+
+def _resolve_bilateral_angle(
+    *,
+    direct_value: Any,
+    direct_alias: Any,
+    left_value: Any,
+    right_value: Any,
+    angle_range: Sequence[float] | None,
+    default: float,
+    count: int,
+    device: Any,
+    dtype: Any,
+    name: str,
+):
+    """Resolve one mirrored thigh/calf angle and reject asymmetric input."""
+
+    import torch
+
+    if direct_value is not None and direct_alias is not None:
+        raise ValueError(f"Specify only one of {name}s and {name}")
+    value = direct_value if direct_value is not None else direct_alias
+    if value is not None or angle_range is not None:
+        if left_value is not None or right_value is not None:
+            raise ValueError(
+                f"Specify either a mirrored {name} value/range or explicit left/right values"
+            )
+        return _resolve_reset_angle(
+            value,
+            angle_range,
+            default,
+            count,
+            device=device,
+            dtype=dtype,
+            name=name,
+        )
+
+    if left_value is None and right_value is None:
+        return _resolve_reset_angle(
+            None,
+            None,
+            default,
+            count,
+            device=device,
+            dtype=dtype,
+            name=name,
+        )
+    if left_value is None:
+        return _as_reset_env_vector(right_value, count, device=device, dtype=dtype, name=f"{name}_R")
+    if right_value is None:
+        return _as_reset_env_vector(left_value, count, device=device, dtype=dtype, name=f"{name}_L")
+    left = _as_reset_env_vector(left_value, count, device=device, dtype=dtype, name=f"{name}_L")
+    right = _as_reset_env_vector(right_value, count, device=device, dtype=dtype, name=f"{name}_R")
+    if not torch.allclose(left, right, atol=1.0e-8, rtol=0.0):
+        raise ValueError(f"Tancho reset requires symmetric left/right {name} angles")
+    return left
+
+
+def _batch_wheel_support_geometry(
+    joint_positions: Mapping[str, Any],
+    count: int,
+    *,
+    fixed_asset: bool,
+) -> tuple[Any, Any, Any, Any]:
+    """Evaluate URDF FK/support for every selected environment.
+
+    Returns torch tensors ``(center_z, support_distance, required_root_z,
+    geometry_by_env)``.  The last item is retained as Python geometry records
+    for diagnostics; the first three are used for batched root-Z placement.
+    """
+
+    import torch
+
+    # This helper is called after angle tensors have been resolved.  Keeping
+    # the FK itself in Python makes the URDF parser the single source of truth
+    # and avoids introducing a second, potentially divergent analytic model.
+    if fixed_asset:
+        geometry = FIXED_RESET_GEOMETRY
+        centers = torch.tensor(
+            [[center[2] for center in geometry.wheel_center_rel_root_m]] * count,
+            dtype=torch.float32,
+        )
+        supports = torch.tensor(
+            [list(geometry.wheel_support_distance_m)] * count,
+            dtype=torch.float32,
+        )
+        required = -centers + supports
+        return centers, supports, required, [geometry] * count
+
+    urdf_root = ET.parse(URDF_PATH).getroot()
+    wheel_radius = _wheel_support_radius(URDF_PATH, urdf_root)
+    # Preserve insertion order only for diagnostics; every wheel/leg value is
+    # looked up by name below so articulation joint order is irrelevant.
+    scalar_positions = {
+        name: torch.as_tensor(value).detach().cpu().reshape(-1).tolist()
+        for name, value in joint_positions.items()
+    }
+    geometries: list[TanchoResetGeometry] = []
+    for env_index in range(count):
+        positions = dict(NOMINAL_JOINT_POSITIONS)
+        for name, values in scalar_positions.items():
+            if len(values) != count:
+                raise ValueError(
+                    f"joint position {name!r} must have one value per selected environment"
+                )
+            positions[name] = float(values[env_index])
+        geometries.append(
+            _wheel_support_geometry_from_urdf(
+                urdf_root,
+                URDF_PATH,
+                positions,
+                wheel_support_radius=wheel_radius,
+            )
+        )
+    centers = torch.tensor(
+        [[center[2] for center in geometry.wheel_center_rel_root_m] for geometry in geometries],
+        dtype=torch.float32,
+    )
+    supports = torch.tensor(
+        [list(geometry.wheel_support_distance_m) for geometry in geometries],
+        dtype=torch.float32,
+    )
+    required = -centers + supports
+    return centers, supports, required, geometries
+
+
 def reset_tancho_on_wheels(
     env: Any,
     env_ids: Any,
@@ -649,8 +1023,19 @@ def reset_tancho_on_wheels(
     terrain_height_fn: TerrainHeightFn | None = None,
     asset_cfg: Any = None,
     fixed_asset: bool = False,
+    thigh_angles: Any = None,
+    calf_angles: Any = None,
+    thigh_angle: Any = None,
+    calf_angle: Any = None,
+    thigh_angle_range: Sequence[float] | None = None,
+    calf_angle_range: Sequence[float] | None = None,
+    wheel_angles: Any = None,
+    wheel_angle: Any = None,
+    reset_joint_positions: Mapping[str, Any] | None = None,
+    joint_positions: Mapping[str, Any] | None = None,
+    terrain_height_per_wheel: Any = None,
 ) -> None:
-    """Atomically reset Tancho to its nominal, stationary wheel-supported pose.
+    """Atomically reset Tancho to a stationary, wheel-supported pose.
 
     Args:
         env: Isaac Lab manager-based environment.
@@ -658,17 +1043,26 @@ def reset_tancho_on_wheels(
         terrain_height: Flat/support-plane height in simulation/world Z.  A
             scalar applies to all selected environments.
         terrain_height_fn: Optional callback ``(env, env_ids, root_xy)`` that
-            returns one support-plane height per selected environment.  This is
-            the extension point for rough or stairs terrains.
+            returns one support-plane height per selected environment or an
+            ``(num_envs, 2)`` tensor of local left/right heights.
         asset_cfg: Scene entity config identifying the articulation.  The
             default is the ``robot`` entity; callers normally pass
             ``SceneEntityCfg("robot")`` from ``EventCfg``.
 
-    The event writes all six nominal joint positions, zero joint velocities,
-    the FK/mesh-derived root pose, and zero root linear/angular velocities in
-    one reset operation.  It intentionally does not modify episode counters;
-    Isaac Lab resets those counters after reset events and before the next
-    episode starts.
+        thigh_angles/calf_angles: A scalar or one value per selected env.  The
+            same value is written to the left and right joint.  If omitted,
+            deterministic nominal values are used.
+        thigh_angle_range/calf_angle_range: Optional ``(min, max)`` ranges
+            sampled independently per selected environment.
+        reset_joint_positions: Optional mapping of exact joint names to
+            scalars/tensors.  Bilateral thigh/calf entries must agree.
+        terrain_height_per_wheel: Optional scalar/per-env/Nx2 local support
+            heights for rough-terrain extensions.
+
+    The event writes the selected q, zero joint velocities, the FK/collision-
+    derived per-env root pose, and zero root linear/angular velocities in one
+    reset operation.  It intentionally does not modify episode counters or
+    step the simulator.
     """
 
     import torch
@@ -692,31 +1086,101 @@ def reset_tancho_on_wheels(
     if count == 0:
         return
 
-    geometry = FIXED_RESET_GEOMETRY if fixed_asset else RESET_GEOMETRY
+    if reset_joint_positions is not None and joint_positions is not None:
+        raise ValueError("Specify only one of reset_joint_positions and joint_positions")
+    requested_positions = dict(reset_joint_positions or joint_positions or {})
+
+    joint_dtype = asset.data.joint_pos.dtype
+    thigh_values = _resolve_bilateral_angle(
+        direct_value=thigh_angles,
+        direct_alias=thigh_angle,
+        left_value=requested_positions.get("joint_thigh_L"),
+        right_value=requested_positions.get("joint_thigh_R"),
+        angle_range=thigh_angle_range,
+        default=NOMINAL_JOINT_POSITIONS["joint_thigh_L"],
+        count=count,
+        device=device,
+        dtype=joint_dtype,
+        name="thigh_angle",
+    )
+    calf_values = _resolve_bilateral_angle(
+        direct_value=calf_angles,
+        direct_alias=calf_angle,
+        left_value=requested_positions.get("joint_calf_L"),
+        right_value=requested_positions.get("joint_calf_R"),
+        angle_range=calf_angle_range,
+        default=NOMINAL_JOINT_POSITIONS["joint_calf_L"],
+        count=count,
+        device=device,
+        dtype=joint_dtype,
+        name="calf_angle",
+    )
+
+    wheel_left = requested_positions.get("joint_wheel_L")
+    wheel_right = requested_positions.get("joint_wheel_R")
+    if wheel_angles is not None and wheel_angle is not None:
+        raise ValueError("Specify only one of wheel_angles and wheel_angle")
+    wheel_direct = wheel_angles if wheel_angles is not None else wheel_angle
+    if wheel_direct is not None and (wheel_left is not None or wheel_right is not None):
+        raise ValueError("Specify wheel angles either directly or in joint_positions, not both")
+    if wheel_direct is not None:
+        wheel_left_values = wheel_right_values = _as_reset_env_vector(
+            wheel_direct, count, device=device, dtype=joint_dtype, name="wheel_angle"
+        )
+    else:
+        wheel_left_values = _resolve_reset_angle(
+            0.0 if wheel_left is None else wheel_left,
+            None,
+            0.0,
+            count,
+            device=device,
+            dtype=joint_dtype,
+            name="joint_wheel_L",
+        )
+        wheel_right_values = _resolve_reset_angle(
+            0.0 if wheel_right is None else wheel_right,
+            None,
+            0.0,
+            count,
+            device=device,
+            dtype=joint_dtype,
+            name="joint_wheel_R",
+        )
+
     nominal_positions = FIXED_NOMINAL_JOINT_POSITIONS if fixed_asset else NOMINAL_JOINT_POSITIONS
-    metadata_source = {
-        "urdf_path": str(FIXED_URDF_PATH if fixed_asset else URDF_PATH),
-        "nominal_joint_positions_rad": dict(nominal_positions),
-        "wheel_center_rel_root_m": geometry.wheel_center_rel_root_m,
-        "wheel_support_radius_m": geometry.wheel_support_radius_m,
-        "wheel_support_distance_m": geometry.wheel_support_distance_m,
-        "canonical_tpu_mesh": CANONICAL_TPU_MESH,
-        "contact_preload_m": RESET_CONTACT_PRELOAD_M,
-        "target_root_height_m": geometry.target_root_height_m,
-        "wheel_gap_m": geometry.wheel_gap_m,
-    }
+    resolved_positions: dict[str, Any] = {}
+    if not fixed_asset:
+        resolved_positions.update(
+            {
+                "joint_thigh_L": thigh_values,
+                "joint_thigh_R": thigh_values,
+                "joint_calf_L": calf_values,
+                "joint_calf_R": calf_values,
+            }
+        )
+    resolved_positions.update(
+        {"joint_wheel_L": wheel_left_values, "joint_wheel_R": wheel_right_values}
+    )
 
     joint_names = list(asset.joint_names)
     joint_count = len(joint_names)
-    joint_dtype = asset.data.joint_pos.dtype
     joint_pos = torch.zeros((count, joint_count), device=device, dtype=joint_dtype)
     joint_vel = torch.zeros_like(joint_pos)
-    for joint_name, nominal_position in nominal_positions.items():
+    for joint_name in nominal_positions:
         try:
             joint_id = joint_names.index(joint_name)
         except ValueError as exc:
             raise RuntimeError(f"Articulation is missing required joint {joint_name!r}") from exc
-        joint_pos[:, joint_id] = nominal_position
+        joint_pos[:, joint_id] = resolved_positions[joint_name]
+
+    center_z, support_distance, required_root_height, geometries = _batch_wheel_support_geometry(
+        {name: resolved_positions[name] for name in nominal_positions},
+        count,
+        fixed_asset=fixed_asset,
+    )
+    center_z = center_z.to(device=device, dtype=joint_dtype)
+    support_distance = support_distance.to(device=device, dtype=joint_dtype)
+    required_root_height = required_root_height.to(device=device, dtype=joint_dtype)
 
     origins = getattr(env.scene, "env_origins", None)
     if origins is None:
@@ -725,16 +1189,17 @@ def reset_tancho_on_wheels(
     else:
         root_positions = origins[env_ids].to(device=device, dtype=joint_dtype).clone()
         root_xy = root_positions[:, :2]
-    heights = _resolve_terrain_height(
+    heights = _resolve_terrain_heights(
         env,
         env_ids,
         root_xy,
         terrain_height,
         terrain_height_fn,
+        terrain_height_per_wheel,
         device=device,
         dtype=joint_dtype,
     )
-    target_root_height = geometry.target_root_height_m + heights
+    target_root_height = torch.amax(required_root_height + heights, dim=-1) - RESET_CONTACT_PRELOAD_M
     # ``heights`` are world-Z support heights.  XY still follows the scene's
     # environment origin, while the root Z is placed directly in world space.
     root_positions[:, 2] = target_root_height
@@ -743,6 +1208,13 @@ def reset_tancho_on_wheels(
     root_pose[:, :3] = root_positions
     root_pose[:, 3] = 1.0
     root_velocity = torch.zeros((count, 6), device=device, dtype=joint_dtype)
+
+    # Clear articulation-side cached state when supported, without touching
+    # episode counters.  The exact state and actuator targets are written
+    # immediately afterwards.
+    asset_reset = getattr(asset, "reset", None)
+    if callable(asset_reset):
+        asset_reset(env_ids)
 
     # The FK above is relative to the root link.  XY follows env_origins while
     # the callback/numeric height supplies the support plane's world Z.
@@ -761,11 +1233,23 @@ def reset_tancho_on_wheels(
     asset.set_joint_velocity_target(joint_vel, joint_ids=slice(None), env_ids=env_ids)
     asset.set_joint_effort_target(torch.zeros_like(joint_pos), joint_ids=slice(None), env_ids=env_ids)
 
-    wheel_gaps = torch.as_tensor(geometry.wheel_gap_m, device=device, dtype=joint_dtype)
+    wheel_gaps = target_root_height.unsqueeze(-1) + center_z - heights - support_distance
+    metadata_source = {
+        "urdf_path": str(FIXED_URDF_PATH if fixed_asset else URDF_PATH),
+        "nominal_joint_positions_rad": dict(nominal_positions),
+        "joint_positions_rad": joint_pos.detach().clone(),
+        "wheel_center_rel_root_z_m": center_z.detach().clone(),
+        "wheel_support_radius_m": float(geometries[0].wheel_support_radius_m),
+        "wheel_support_distance_m": support_distance.detach().clone(),
+        "canonical_tpu_mesh": CANONICAL_TPU_MESH,
+        "contact_preload_m": RESET_CONTACT_PRELOAD_M,
+        "required_root_height_m": (required_root_height + heights).detach().clone(),
+    }
     metadata = {
         **metadata_source,
-        "terrain_height_m": heights.detach().clone(),
-        "target_root_height_m": target_root_height.detach().clone(),
+        "terrain_height_m": heights[:, 0].detach().clone(),
+        "terrain_height_per_wheel_m": heights.detach().clone(),
+        "computed_root_height_m": target_root_height.detach().clone(),
         "wheel_gap_m": wheel_gaps.detach().clone(),
         "env_ids": env_ids.detach().clone(),
     }

@@ -14,13 +14,13 @@ import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
-from isaaclab.managers import EventTermCfg as EventTerm, SceneEntityCfg
+from isaaclab.managers import EventTermCfg as EventTerm, ObservationGroupCfg as ObsGroup, ObservationTermCfg as ObsTerm, SceneEntityCfg
 from isaaclab.utils import configclass
 import isaaclab.envs.mdp as mdp
 
 from . import custom_events as ce
 from .flat_env_cfg import FlatRewardsCfg, make_flat_terrain
-from .tancho_v3_env_cfg import CommandsCfg, CurriculumCfg, ObservationsCfg, TerminationsCfg
+from .tancho_v3_env_cfg import CommandsCfg, CurriculumCfg, TerminationsCfg
 
 
 ASSET_DIR = Path(__file__).resolve().parents[3] / "assets" / "robots" / "Tancho_v3"
@@ -29,13 +29,62 @@ FIXED_URDF_PATH = str(ASSET_DIR / "urdf" / "Tancho_v3_fixed.urdf")
 
 @configclass
 class FixedActionsCfg:
-    """Two physical wheel-torque actions; the legs are rigid bodies, not PD-held joints."""
+    """Two DM-H3510 velocity targets; the legs are rigid bodies, not PD-held joints."""
 
-    joint_vel = mdp.JointEffortActionCfg(
+    joint_vel = mdp.JointVelocityActionCfg(
         asset_name="robot",
         joint_names=["joint_wheel_L", "joint_wheel_R"],
-        scale=0.45,
+        scale=52.3598776,
+        use_default_offset=True,
     )
+
+
+@configclass
+class FixedObservationsCfg:
+    """Wheel-only state without nonexistent leg DOFs or unbounded wheel angle."""
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel, scale=2.0)
+        base_ang_vel = ObsTerm(
+            func=mdp.imu_ang_vel,
+            scale=0.25,
+            params={"asset_cfg": SceneEntityCfg("imu")},
+        )
+        base_pos_z = ObsTerm(func=mdp.base_pos_z, scale=1.0)
+        projected_gravity = ObsTerm(
+            func=mdp.imu_projected_gravity,
+            params={"asset_cfg": SceneEntityCfg("imu")},
+        )
+        velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"})
+        wheel_joint_vel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            scale=0.05,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=["joint_wheel_L", "joint_wheel_R"],
+                    preserve_order=True,
+                )
+            },
+        )
+        actions = ObsTerm(func=mdp.last_action)
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    policy: PolicyCfg = PolicyCfg()
+
+
+@configclass
+class FixedRewardsCfg(FlatRewardsCfg):
+    """Remove only terms whose articulated leg joints were rigidly merged."""
+
+    leg_torque = None
+    mirror = None
+    joint_acceleration = None
+    leg_position_limits = None
 
 
 @configclass
@@ -127,7 +176,7 @@ class TanchoV3FixedFlatSceneCfg(InteractiveSceneCfg):
             "wheels": ImplicitActuatorCfg(
                 joint_names_expr=["joint_wheel_L", "joint_wheel_R"],
                 stiffness=0.0,
-                damping=0.0,
+                damping=4.0,
                 effort_limit_sim=0.45,
                 velocity_limit_sim=188.0,
             )
@@ -150,14 +199,15 @@ class TanchoV3FixedFlatEnvCfg(ManagerBasedRLEnvCfg):
     scene: TanchoV3FixedFlatSceneCfg = TanchoV3FixedFlatSceneCfg(num_envs=4096, env_spacing=3.0)
     actions: FixedActionsCfg = FixedActionsCfg()
     commands: CommandsCfg = CommandsCfg()
-    observations: ObservationsCfg = ObservationsCfg()
-    rewards: FlatRewardsCfg = FlatRewardsCfg()
+    observations: FixedObservationsCfg = FixedObservationsCfg()
+    rewards: FixedRewardsCfg = FixedRewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
     events: FixedEventCfg = FixedEventCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
 
     def __post_init__(self):
-        self.decimation = 2
+        # Match the full-body baseline: 200 Hz physics and 50 Hz actions.
+        self.decimation = 4
         self.episode_length_s = 20.0
         self.sim.dt = 0.005
 

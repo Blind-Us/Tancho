@@ -34,6 +34,12 @@ parser.add_argument(
     help="Use the pre-trained checkpoint from Nucleus.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument(
+    "--export-only",
+    action="store_true",
+    default=False,
+    help="Load the checkpoint, export JIT/ONNX, validate the ONNX file, and exit without running Play.",
+)
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -196,6 +202,35 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # export to JIT and ONNX
         export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
         export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+
+    # Validate the serialized graph before reporting a successful one-click
+    # conversion.  This checks the ONNX structure without requiring the
+    # optional onnxruntime package.
+    onnx_path = os.path.join(export_model_dir, "policy.onnx")
+    try:
+        import onnx
+
+        onnx_model = onnx.load(onnx_path)
+        onnx.checker.check_model(onnx_model)
+        input_descriptions = [
+            f"{value.name}:{[dim.dim_value or dim.dim_param for dim in value.type.tensor_type.shape.dim]}"
+            for value in onnx_model.graph.input
+        ]
+        output_descriptions = [
+            f"{value.name}:{[dim.dim_value or dim.dim_param for dim in value.type.tensor_type.shape.dim]}"
+            for value in onnx_model.graph.output
+        ]
+        print(f"[INFO] ONNX validation passed: {onnx_path}")
+        print(f"[INFO] ONNX inputs: {input_descriptions}")
+        print(f"[INFO] ONNX outputs: {output_descriptions}")
+    except Exception as exc:
+        env.close()
+        raise RuntimeError(f"ONNX validation failed for {onnx_path}: {exc}") from exc
+
+    if args_cli.export_only:
+        print("[INFO] Export-only mode complete; Play loop was not started.")
+        env.close()
+        return
 
     dt = env.unwrapped.step_dt
 

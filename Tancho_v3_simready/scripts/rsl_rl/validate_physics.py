@@ -247,6 +247,70 @@ def _generalized_joint_offset(width: int, num_joints: int) -> int:
     )
 
 
+def _resolve_generalized_layout(robot: Any, matrix_width: int) -> dict[str, Any]:
+    """Resolve and verify PhysX's generalized-coordinate ordering.
+
+    ``get_generalized_mass_matrices`` is indexed in the PhysX articulation
+    order, not by an arbitrary task/action ordering.  For a floating-base
+    articulation PhysX defines the first six coordinates as world-frame root
+    linear then angular coordinates, followed by the DOFs in
+    ``shared_metatype.dof_names`` order.  Verify every part of that contract
+    against the live articulation before constructing ``tau`` or ``qdd``;
+    never infer a prefix only from matrix width.
+    """
+
+    num_joints = int(getattr(robot, "num_joints", -1))
+    joint_names = [str(name) for name in getattr(robot, "joint_names", [])]
+    if num_joints <= 0 or len(joint_names) != num_joints:
+        raise RuntimeError(
+            f"invalid articulation DOF metadata: num_joints={num_joints}, joint_names={joint_names!r}"
+        )
+    view = getattr(robot, "root_physx_view", None)
+    metatype = getattr(view, "shared_metatype", None)
+    metadata_names = [str(name) for name in getattr(metatype, "dof_names", [])]
+    if not metadata_names:
+        raise MissingAPIError("PhysX shared_metatype.dof_names is unavailable; cannot verify DOF ordering")
+    if metadata_names != joint_names:
+        raise RuntimeError(
+            "PhysX/Isaac-Lab joint ordering mismatch: "
+            f"robot.joint_names={joint_names!r}, shared_metatype.dof_names={metadata_names!r}"
+        )
+
+    fixed_base = bool(getattr(robot, "is_fixed_base", False))
+    if fixed_base:
+        root_dof_offset = 0
+        root_dof_order: list[str] = []
+        expected_width = num_joints
+        convention = "fixed-base: joint DOFs only"
+    else:
+        root_dof_offset = 6
+        root_dof_order = list(ROOT_DOF_ORDER)
+        expected_width = root_dof_offset + num_joints
+        convention = "floating-base PhysX: [root linear xyz world, root angular xyz world, joint DOFs]"
+    if int(matrix_width) != expected_width:
+        raise RuntimeError(
+            "PhysX generalized matrix width disagrees with verified articulation layout: "
+            f"width={matrix_width}, expected={expected_width}, fixed_base={fixed_base}, "
+            f"num_joints={num_joints}"
+        )
+
+    body_names = [str(name) for name in getattr(robot, "body_names", [])]
+    if not body_names:
+        raise RuntimeError("PhysX body_names are unavailable; cannot verify root acceleration ordering")
+    return {
+        "matrix_width": int(matrix_width),
+        "num_joints": num_joints,
+        "fixed_base": fixed_base,
+        "root_dof_offset": root_dof_offset,
+        "root_dof_order": root_dof_order,
+        "joint_dof_order": joint_names,
+        "physx_dof_names": metadata_names,
+        "physx_body_names": body_names,
+        "convention": convention,
+        "verified": True,
+    }
+
+
 def _relative_error(actual: torch.Tensor, expected: torch.Tensor, floor: float = 1.0e-12) -> float:
     denom = max(float(torch.max(torch.abs(expected)).item()), floor)
     return float(torch.max(torch.abs(actual - expected)).item()) / denom
@@ -365,12 +429,30 @@ def _parse_urdf(path: Path) -> dict[str, Any]:
         child = joint.find("child")
         if parent is None or child is None:
             raise ValueError(f"URDF joint {joint.attrib.get('name')} lacks parent/child")
+        axis_node = joint.find("axis")
+        axis_values = [
+            float(x)
+            for x in (
+                axis_node.attrib.get("xyz", "1 0 0")
+                if axis_node is not None
+                else "1 0 0"
+            ).split()
+        ]
+        if len(axis_values) != 3:
+            raise ValueError(f"Invalid URDF joint axis for {joint.attrib.get('name')}: {axis_values!r}")
+        axis_norm = math.sqrt(sum(value * value for value in axis_values))
+        if axis_norm <= 1.0e-12:
+            raise ValueError(f"URDF joint {joint.attrib.get('name')} has a zero-length axis")
         item = {
             "name": joint.attrib.get("name", ""),
             "type": joint.attrib.get("type", "fixed"),
             "parent": parent.attrib["link"],
             "child": child.attrib["link"],
             "tf": _parse_xyz_rpy(joint.find("origin")),
+            # Keep the declared axis in the report.  Effort routing is still
+            # resolved through PhysX's joint id; this prevents a left/right
+            # sign convention from being guessed from a joint name alone.
+            "axis": tuple(value / axis_norm for value in axis_values),
         }
         joints.append(item)
         parent_joint[item["child"]] = item
@@ -680,8 +762,9 @@ def run_gate_a(env: Any, env_cfg: ManagerBasedRLEnvCfg, urdf_path: Path, rows: l
         if mass_matrix.shape[0] < 1 or mass_matrix.shape[-1] != mass_matrix.shape[-2]:
             raise RuntimeError(f"invalid generalized mass matrix shape: {tuple(mass_matrix.shape)}")
         width = int(mass_matrix.shape[-1])
-        num_joints = int(robot.num_joints)
-        root_offset = _generalized_joint_offset(width, num_joints)
+        layout = _resolve_generalized_layout(robot, width)
+        num_joints = int(layout["num_joints"])
+        root_offset = int(layout["root_dof_offset"])
         matrix0 = mass_matrix[0].to(dtype=torch.float64)
         sym_abs = float(torch.max(torch.abs(matrix0 - matrix0.T)).item())
         matrix_scale = max(float(torch.max(torch.abs(matrix0)).item()), 1.0e-12)
@@ -703,7 +786,10 @@ def run_gate_a(env: Any, env_cfg: ManagerBasedRLEnvCfg, urdf_path: Path, rows: l
             "shape": list(matrix0.shape),
             "num_joints": num_joints,
             "root_dof_offset": root_offset,
-            "root_dof_description": "0 (fixed-base layout)" if root_offset == 0 else "6 world root DOFs [lin xyz, ang xyz]",
+            "root_dof_description": layout["convention"],
+            "joint_dof_order": layout["joint_dof_order"],
+            "physx_dof_names": layout["physx_dof_names"],
+            "dof_order_verified": layout["verified"],
             "symmetry_max_abs": sym_abs,
             "symmetry_relative": sym_rel,
             "eigen_min": eig_min,
@@ -718,6 +804,8 @@ def run_gate_a(env: Any, env_cfg: ManagerBasedRLEnvCfg, urdf_path: Path, rows: l
                 "status": "PASS" if matrix_pass else "FAIL",
                 "matrix_shape": "x".join(str(x) for x in matrix0.shape),
                 "root_dof_offset": root_offset,
+                "joint_dof_order": layout["joint_dof_order"],
+                "dof_order_verified": layout["verified"],
                 "symmetry_relative": sym_rel,
                 "eigen_min": eig_min,
                 "eigen_max": eig_max,
@@ -760,7 +848,26 @@ PROBE_JOINT_NAMES = [
     "joint_calf_R",
     "joint_wheel_R",
 ]
+# These are the formal actuator limits in the Tancho V3 task configuration.
+# Gate C intentionally probes far below the limits, while still covering the
+# required wheel amplitudes and both signs for every DOF.
+OFFICIAL_EFFORT_LIMITS_NM = {
+    "joint_thigh_L": 12.5,
+    "joint_calf_L": 12.5,
+    "joint_wheel_L": 0.45,
+    "joint_thigh_R": 12.5,
+    "joint_calf_R": 12.5,
+    "joint_wheel_R": 0.45,
+}
 TORQUE_AMPLITUDES = (0.05, 0.10, 0.20)
+ROOT_DOF_ORDER = (
+    "root_lin_x_world",
+    "root_lin_y_world",
+    "root_lin_z_world",
+    "root_ang_x_world",
+    "root_ang_y_world",
+    "root_ang_z_world",
+)
 
 
 def _configure_probe_cfg(base_cfg: ManagerBasedRLEnvCfg, dt: float) -> ManagerBasedRLEnvCfg:
@@ -774,6 +881,10 @@ def _configure_probe_cfg(base_cfg: ManagerBasedRLEnvCfg, dt: float) -> ManagerBa
     cfg.sim.dt = float(dt)
     cfg.decimation = 1
     cfg.episode_length_s = max(float(getattr(cfg, "episode_length_s", 20.0)), 1.0)
+    # Keep the task's terrain in the scene for compatibility with its manager
+    # configuration, but put the robot well above it.  Contact-free status is
+    # proved from the live body clearance and contact sensor after a full
+    # history warm-up; no terrain collision is allowed to enter the sample.
     state = cfg.scene.robot.init_state
     old_pos = tuple(state.pos)
     state.pos = (old_pos[0], old_pos[1], float(args_cli.probe_root_height))
@@ -815,11 +926,21 @@ def _zero_state_and_read(robot: Any, base_env: Any) -> dict[str, Any]:
     base_env.sim.forward()
 
     # The task's custom reset intentionally puts the robot on its wheels,
-    # overriding cfg.init_state.z.  Flush one zero-force, gravity-free step at
-    # the explicit airborne probe height so contact-sensor history cannot leak
-    # into a later torque case, then restore exact zero velocity for t=0.
-    base_env.sim.step(render=False)
-    base_env.scene.update(float(base_env.cfg.sim.dt))
+    # overriding cfg.init_state.z.  Move it airborne and flush the complete
+    # contact-sensor history with zero-force, gravity-free steps.  A single
+    # warm-up step is insufficient when history_length > 1 because it retains
+    # the reset contact impulse in older frames.
+    sensor = getattr(getattr(base_env.scene, "sensors", None), "get", lambda _name: None)("contact_forces")
+    history_length = int(getattr(getattr(sensor, "cfg", None), "history_length", 1))
+    warmup_steps = max(2, history_length + 1)
+    for _ in range(warmup_steps):
+        robot.set_joint_effort_target(torch.zeros_like(robot.data.joint_effort_target))
+        base_env.scene.write_data_to_sim()
+        base_env.sim.step(render=False)
+        base_env.scene.update(float(base_env.cfg.sim.dt))
+
+    # Define the formal measurement state after warm-up, restoring exact zero
+    # velocity so finite-difference acceleration is a first-step measurement.
     root_state = robot.data.root_link_state_w[0].clone().to(device=device)
     root_state[2] = float(args_cli.probe_root_height)
     root_state[7:] = 0.0
@@ -828,6 +949,7 @@ def _zero_state_and_read(robot: Any, base_env: Any) -> dict[str, Any]:
     robot.set_joint_effort_target(torch.zeros_like(robot.data.joint_effort_target))
     base_env.scene.write_data_to_sim()
     base_env.sim.forward()
+    base_env.scene.update(0.0)
 
     # Read back the written state before the force step.  This catches a
     # backend that silently ignored the zero-velocity write.
@@ -839,6 +961,8 @@ def _zero_state_and_read(robot: Any, base_env: Any) -> dict[str, Any]:
         "contact_peak_before": _contact_peak(base_env),
         "root_height": float(robot.data.root_pos_w[0, 2].item()),
         "body_min_z": float(torch.min(robot.data.body_pos_w[0, :, 2]).item()),
+        "contact_history_length": history_length,
+        "warmup_steps": warmup_steps,
     }
 
 
@@ -866,10 +990,34 @@ def _read_generalized_velocity(robot: Any, *, root_offset: int) -> torch.Tensor:
     return torch.cat((root_vel, joint_vel), dim=0)
 
 
+def _probe_joint_metadata(urdf_path: Path) -> dict[str, dict[str, Any]]:
+    """Return declared axes and formal effort limits for every probe joint."""
+
+    urdf = _parse_urdf(urdf_path)
+    by_name = {str(item["name"]): item for item in urdf["joints"]}
+    metadata: dict[str, dict[str, Any]] = {}
+    for name in PROBE_JOINT_NAMES:
+        item = by_name.get(name)
+        if item is None:
+            raise RuntimeError(f"URDF is missing probe joint {name!r}")
+        if item.get("type") not in ("revolute", "continuous"):
+            raise RuntimeError(f"Probe joint {name!r} is not a movable revolute joint: {item.get('type')!r}")
+        axis = tuple(float(value) for value in item["axis"])
+        axis_norm = math.sqrt(sum(value * value for value in axis))
+        if abs(axis_norm - 1.0) > 1.0e-6:
+            raise RuntimeError(f"URDF probe axis for {name!r} is not unit length: {axis!r}")
+        metadata[name] = {
+            "axis": axis,
+            "effort_limit_Nm": float(OFFICIAL_EFFORT_LIMITS_NM[name]),
+        }
+    return metadata
+
+
 def run_probe_for_dt(
     base_cfg: ManagerBasedRLEnvCfg,
     dt: float,
     rows: list[dict[str, Any]],
+    urdf_path: Path,
 ) -> dict[str, Any]:
     """Run all +/- torque cases at one physics dt and return detailed samples."""
 
@@ -877,37 +1025,60 @@ def run_probe_for_dt(
     env = None
     output: dict[str, Any] = {"dt": float(dt), "samples": [], "error": None}
     try:
+        probe_metadata = _probe_joint_metadata(urdf_path)
         env = gym.make(args_cli.task, cfg=cfg)
         base_env = env.unwrapped
         robot = base_env.scene["robot"]
         joint_ids, joint_names = robot.find_joints(PROBE_JOINT_NAMES, preserve_order=True)
-        if len(joint_ids) != len(PROBE_JOINT_NAMES):
+        if len(joint_ids) != len(PROBE_JOINT_NAMES) or list(joint_names) != PROBE_JOINT_NAMES:
             raise RuntimeError(f"probe joint resolution failed: {joint_names!r}")
         view = getattr(robot, "root_physx_view", None)
         if view is None or not callable(getattr(view, "get_generalized_mass_matrices", None)):
             raise MissingAPIError("PhysX get_generalized_mass_matrices is unavailable")
         if not hasattr(robot.data, "joint_acc") or not hasattr(robot.data, "body_acc_w"):
             raise MissingAPIError("robot.data.joint_acc/body_acc_w are unavailable")
+        mass_probe = _normalize_mass_matrix(view.get_generalized_mass_matrices(), device=base_env.device)
+        layout = _resolve_generalized_layout(robot, int(mass_probe.shape[-1]))
+        actual_effort_limits = _as_tensor(robot.data.joint_effort_limits, device="cpu", dtype=torch.float64)
+        if actual_effort_limits.ndim == 2:
+            actual_effort_limits = actual_effort_limits[0]
+        if actual_effort_limits.ndim != 1 or actual_effort_limits.numel() != robot.num_joints:
+            raise RuntimeError(
+                f"unexpected joint effort-limit shape {tuple(actual_effort_limits.shape)} for {robot.num_joints} DOFs"
+            )
+        gravity = tuple(float(value) for value in getattr(base_env.sim.cfg, "gravity", ()))
+        gravity_off_pass = len(gravity) == 3 and max(abs(value) for value in gravity) <= 1.0e-12
+        if not gravity_off_pass:
+            raise RuntimeError(f"probe simulation gravity is not disabled: {gravity!r}")
         for joint_slot, (joint_id, joint_name) in enumerate(zip(joint_ids, joint_names)):
             for amplitude in TORQUE_AMPLITUDES:
                 for sign in (1.0, -1.0):
                     torque = float(sign * amplitude)
                     env.reset()
                     state_detail = _zero_state_and_read(robot, base_env)
-                    if state_detail["root_height"] <= 0.1 or state_detail["body_min_z"] <= 0.0:
+                    if state_detail["root_height"] <= 0.1 or state_detail["body_min_z"] <= 0.01:
                         raise RuntimeError(
                             "airborne setup failed: "
                             f"root_z={state_detail['root_height']:.6f}, body_min_z={state_detail['body_min_z']:.6f}"
                         )
+                    official_limit = float(probe_metadata[joint_name]["effort_limit_Nm"])
+                    actual_limit = float(actual_effort_limits[int(joint_id)].item())
+                    limit_pass = abs(torque) <= official_limit + 1.0e-12 and abs(torque) <= actual_limit + 1.0e-9
                     zero_state_pass = (
                         state_detail["joint_vel_max_abs"] <= 1.0e-7
                         and state_detail["root_vel_max_abs"] <= 1.0e-7
                         and state_detail["contact_peak_before"] <= 1.0e-4
+                        and state_detail["root_height"] > 0.1
+                        and state_detail["body_min_z"] > 0.01
+                        and gravity_off_pass
                     )
 
                     mass = _normalize_mass_matrix(view.get_generalized_mass_matrices(), device=base_env.device)
                     width = int(mass.shape[-1])
-                    root_offset = _generalized_joint_offset(width, int(robot.num_joints))
+                    case_layout = _resolve_generalized_layout(robot, width)
+                    if case_layout != layout:
+                        raise RuntimeError("PhysX generalized DOF layout changed between torque cases")
+                    root_offset = int(layout["root_dof_offset"])
                     matrix = mass[0].to(dtype=torch.float64)
                     tau = torch.zeros(width, device=base_env.device, dtype=torch.float64)
                     tau[root_offset + int(joint_id)] = torque
@@ -917,11 +1088,18 @@ def run_probe_for_dt(
                     # articulation buffer.  Manager actions stage their target
                     # one update later, which would make the first measured
                     # PhysX step appear to have zero joint acceleration.
-                    robot.set_joint_effort_target(
-                        torch.tensor([[torque]], device=base_env.device, dtype=torch.float32),
-                        joint_ids=[int(joint_id)],
+                    effort_target = torch.zeros(
+                        (1, int(robot.num_joints)), device=base_env.device, dtype=torch.float32
                     )
+                    effort_target[0, int(joint_id)] = torque
+                    robot.set_joint_effort_target(effort_target)
                     robot.write_data_to_sim()
+                    applied_vector_before = robot.data.applied_torque[0].detach().to(dtype=torch.float64)
+                    actual_torque_before = float(applied_vector_before[int(joint_id)].item())
+                    other_torque_values = torch.cat(
+                        (applied_vector_before[: int(joint_id)], applied_vector_before[int(joint_id) + 1 :])
+                    )
+                    other_torque_max = float(torch.max(torch.abs(other_torque_values)).item())
                     base_env.sim.step(render=False)
                     base_env.scene.update(float(dt))
                     qd_after = _read_generalized_velocity(robot, root_offset=root_offset).to(dtype=torch.float64)
@@ -933,7 +1111,7 @@ def run_probe_for_dt(
                     if qdd_meas.numel() != qdd_pred.numel():
                         raise RuntimeError(f"measured/predicted qdd width mismatch: {qdd_meas.shape} vs {qdd_pred.shape}")
                     contact_after = _contact_peak(base_env)
-                    actual_torque = float(robot.data.applied_torque[0, joint_id].item())
+                    actual_torque = actual_torque_before
                     predicted_target = float(qdd_pred[root_offset + int(joint_id)].item())
                     measured_target = float(qdd_meas[root_offset + int(joint_id)].item())
                     fit_abs = float(torch.max(torch.abs(qdd_meas - qdd_pred)).item())
@@ -942,6 +1120,16 @@ def run_probe_for_dt(
                     fit_pass = fit_rel <= 0.25 or fit_abs <= 0.5
                     torque_pass = torque_error <= max(2.0e-3, abs(torque) * 0.03)
                     contact_pass = contact_after <= 1.0e-4
+                    name_routing_pass = layout["joint_dof_order"][int(joint_id)] == joint_name
+                    axis = tuple(float(value) for value in probe_metadata[joint_name]["axis"])
+                    axis_norm = math.sqrt(sum(value * value for value in axis))
+                    axis_pass = abs(axis_norm - 1.0) <= 1.0e-6
+                    routing_pass = (
+                        name_routing_pass
+                        and axis_pass
+                        and torque_pass
+                        and other_torque_max <= 1.0e-5
+                    )
                     direction_pass = (
                         abs(predicted_target) > 1.0e-9
                         and abs(measured_target) > 1.0e-9
@@ -951,13 +1139,28 @@ def run_probe_for_dt(
                     row = {
                         "gate": "gate-c",
                         "test": "known_torque",
-                        "status": "PASS" if (zero_state_pass and fit_pass and torque_pass and contact_pass and direction_pass) else "FAIL",
+                        "status": "PASS" if (zero_state_pass and fit_pass and limit_pass and contact_pass and direction_pass and routing_pass) else "FAIL",
                         "dt_s": float(dt),
                         "joint": joint_name,
                         "joint_slot": joint_slot,
+                        "physx_joint_id": int(joint_id),
+                        "joint_dof_order": ";".join(layout["joint_dof_order"]),
+                        "root_dof_order": ";".join(layout["root_dof_order"]),
+                        "dof_order_verified": bool(layout["verified"]),
+                        "urdf_axis": ";".join(f"{value:.9g}" for value in axis),
+                        "urdf_axis_x": axis[0],
+                        "urdf_axis_y": axis[1],
+                        "urdf_axis_z": axis[2],
                         "torque_Nm": torque,
                         "actual_torque_Nm": actual_torque,
                         "torque_error_Nm": torque_error,
+                        "official_effort_limit_Nm": official_limit,
+                        "physx_effort_limit_Nm": actual_limit,
+                        "effort_limit_pass": limit_pass,
+                        "other_joint_torque_max_Nm": other_torque_max,
+                        "joint_name_routing_pass": name_routing_pass,
+                        "joint_axis_pass": axis_pass,
+                        "torque_routing_pass": routing_pass,
                         "mass_matrix_shape": "x".join(str(x) for x in matrix.shape),
                         "root_dof_offset": root_offset,
                         "qdd_pred_target_rad_s2": predicted_target,
@@ -968,11 +1171,15 @@ def run_probe_for_dt(
                         "root_vel_before_max_abs": state_detail["root_vel_max_abs"],
                         "contact_peak_before_N": state_detail["contact_peak_before"],
                         "contact_peak_after_N": contact_after,
+                        "airborne_root_height_m": state_detail["root_height"],
                         "airborne_body_min_z_m": state_detail["body_min_z"],
+                        "gravity_off": gravity_off_pass,
                         "zero_state_pass": zero_state_pass,
                         "fit_pass": fit_pass,
+                        "limit_pass": limit_pass,
                         "torque_pass": torque_pass,
                         "direction_pass": direction_pass,
+                        "routing_pass": routing_pass,
                         "contact_free_pass": contact_pass,
                     }
                     rows.append(row)
@@ -1003,7 +1210,7 @@ def run_probe_for_dt(
                 output["error"] = output.get("error") or f"{type(exc).__name__} while closing probe env: {exc}"
 
 
-def run_gate_c(base_cfg: ManagerBasedRLEnvCfg, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def run_gate_c(base_cfg: ManagerBasedRLEnvCfg, rows: list[dict[str, Any]], urdf_path: Path) -> dict[str, Any]:
     result = _result("gate-c")
     dt = float(base_cfg.sim.dt)
     if dt <= 0.0:
@@ -1012,7 +1219,7 @@ def run_gate_c(base_cfg: ManagerBasedRLEnvCfg, rows: list[dict[str, Any]]) -> di
 
     if args_cli.gate_c_single_dt_scale is not None:
         probe_dt = dt * float(args_cli.gate_c_single_dt_scale)
-        probe = run_probe_for_dt(base_cfg, probe_dt, rows)
+        probe = run_probe_for_dt(base_cfg, probe_dt, rows, urdf_path)
         if probe.get("error"):
             result["errors"].append(f"dt={probe_dt:g}: {probe['error']}")
             return _finish_result(result)
@@ -1023,8 +1230,10 @@ def run_gate_c(base_cfg: ManagerBasedRLEnvCfg, rows: list[dict[str, Any]]) -> di
         direct_pass = bool(direct_rows) and all(
             bool(row.get("zero_state_pass"))
             and bool(row.get("fit_pass"))
+            and bool(row.get("limit_pass"))
             and bool(row.get("torque_pass"))
             and bool(row.get("direction_pass"))
+            and bool(row.get("routing_pass"))
             and bool(row.get("contact_free_pass"))
             for row in direct_rows
         )
@@ -1033,6 +1242,18 @@ def run_gate_c(base_cfg: ManagerBasedRLEnvCfg, rows: list[dict[str, Any]]) -> di
             "known_torque_M_inverse_tau_vs_first_step_qdd",
             direct_pass,
             {"dt_s": probe_dt, "sample_count": len(direct_rows), "single_dt_process": True},
+        )
+        _check(
+            result,
+            "official_effort_limits",
+            bool(direct_rows) and all(bool(row.get("limit_pass")) for row in direct_rows),
+            {"limits_Nm": OFFICIAL_EFFORT_LIMITS_NM, "sample_count": len(direct_rows)},
+        )
+        _check(
+            result,
+            "joint_axis_and_torque_routing",
+            bool(direct_rows) and all(bool(row.get("routing_pass")) for row in direct_rows),
+            {"sample_count": len(direct_rows), "dof_order_verified": all(bool(row.get("dof_order_verified")) for row in direct_rows)},
         )
         symmetry = []
         for joint_name in PROBE_JOINT_NAMES:
@@ -1053,8 +1274,8 @@ def run_gate_c(base_cfg: ManagerBasedRLEnvCfg, rows: list[dict[str, Any]]) -> di
         )
         return _finish_result(result)
 
-    samples_dt = run_probe_for_dt(base_cfg, dt, rows)
-    samples_half = run_probe_for_dt(base_cfg, dt * 0.5, rows)
+    samples_dt = run_probe_for_dt(base_cfg, dt, rows, urdf_path)
+    samples_half = run_probe_for_dt(base_cfg, dt * 0.5, rows, urdf_path)
     if samples_dt.get("error"):
         result["errors"].append(f"dt={dt:g}: {samples_dt['error']}")
     if samples_half.get("error"):
@@ -1066,8 +1287,10 @@ def run_gate_c(base_cfg: ManagerBasedRLEnvCfg, rows: list[dict[str, Any]]) -> di
     base_checks = bool(samples) and all(
         bool(row.get("zero_state_pass"))
         and bool(row.get("fit_pass"))
+        and bool(row.get("limit_pass"))
         and bool(row.get("torque_pass"))
         and bool(row.get("direction_pass"))
+        and bool(row.get("routing_pass"))
         and bool(row.get("contact_free_pass"))
         for row in rows
         if row.get("gate") == "gate-c" and row.get("test") == "known_torque"
@@ -1082,6 +1305,22 @@ def run_gate_c(base_cfg: ManagerBasedRLEnvCfg, rows: list[dict[str, Any]]) -> di
             "fit_absolute_fallback": 0.5,
             "all_rows_pass": base_checks,
         },
+    )
+    direct_rows = [
+        row for row in rows
+        if row.get("gate") == "gate-c" and row.get("test") == "known_torque"
+    ]
+    _check(
+        result,
+        "official_effort_limits",
+        bool(direct_rows) and all(bool(row.get("limit_pass")) for row in direct_rows),
+        {"limits_Nm": OFFICIAL_EFFORT_LIMITS_NM, "sample_count": len(direct_rows)},
+    )
+    _check(
+        result,
+        "joint_axis_and_torque_routing",
+        bool(direct_rows) and all(bool(row.get("routing_pass")) for row in direct_rows),
+        {"sample_count": len(direct_rows), "dof_order_verified": all(bool(row.get("dof_order_verified")) for row in direct_rows)},
     )
 
     # +/- symmetry at each dt, wheel, and amplitude.  Compare the full
@@ -1184,7 +1423,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
 
     if args_cli.mode in ("gate-c", "all"):
         try:
-            summary["gates"]["gate_c"] = run_gate_c(env_cfg, rows)
+            summary["gates"]["gate_c"] = run_gate_c(env_cfg, rows, urdf_path)
         except Exception as exc:
             gate = _result("gate-c")
             gate["errors"].append(f"{type(exc).__name__}: {exc}")
@@ -1209,17 +1448,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     direct_rows = [row for row in rows if row.get("gate") == "gate-c" and row.get("test") == "known_torque"]
     if direct_rows:
         print("\nGate-C contact-free first-step samples:")
-        print("  dt[s]  joint          tau[Nm]  qdd_pred  qdd_meas  fit_rel  status")
+        print("  dt[s]  joint          tau[Nm]  qdd_pred  qdd_meas  fit_rel  route  status")
         for row in direct_rows:
             print(
                 f"  {float(row['dt_s']):.6f}  {str(row['joint']):<14}  "
                 f"{float(row['torque_Nm']):+7.3f}  {float(row['qdd_pred_target_rad_s2']):+9.3f}  "
                 f"{float(row['qdd_meas_target_rad_s2']):+9.3f}  {float(row['qdd_fit_relative']):7.4f}  "
-                f"{row['status']}"
+                f"{'PASS' if row.get('routing_pass') else 'FAIL':<5}  {row['status']}"
             )
     for name in ("gate_a", "gate_c"):
         gate = summary["gates"][name]
         print(f"{name.upper():<10}: {gate.get('status')}")
+        if name == "gate_c":
+            for check_name, check in gate.get("checks", {}).items():
+                print(f"  {check_name:<42}: {check.get('status')}")
         for error in gate.get("errors", []):
             print(f"  ERROR: {error}")
     print(f"OVERALL    : {summary['status']}")

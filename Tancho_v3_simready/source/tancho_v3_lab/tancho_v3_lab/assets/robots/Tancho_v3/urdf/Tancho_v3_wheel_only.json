@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "source_urdf": "/media/azul/861896C11896B023/Tancho/Tancho_v3_simready/source/tancho_v3_lab/tancho_v3_lab/assets/robots/Tancho_v3/urdf/Tancho_v3.urdf",
+  "source_sha256": "a19ee2cd03e624a2d0566e5ba49c7b0f5941d01fd6158c604119f514bfe578f1",
+  "generated_urdf": "/media/azul/861896C11896B023/Tancho/Tancho_v3_simready/source/tancho_v3_lab/tancho_v3_lab/assets/robots/Tancho_v3/urdf/Tancho_v3_wheel_only.urdf",
+  "generated_sha256": "7717faa12a2abd37df4307e75166e3451dd6cf2e5aee88116dd34c1bbae71f44",
+  "nominal_joint_positions_rad": {
+    "joint_thigh_L": -0.5,
+    "joint_calf_L": 0.87,
+    "joint_thigh_R": -0.5,
+    "joint_calf_R": 0.87
+  },
+  "movable_joints": [
+    "joint_wheel_L",
+    "joint_wheel_R"
+  ],
+  "wheel_effort_limit_nm": 0.45,
+  "wheel_collision_support_radius_m": 0.03614,
+  "merged_body_mass_kg": 2.5537,
+  "merged_body_com_root_m": [
+    -0.014591508621797908,
+    3.483663301918466e-10,
+    -0.060093791382534685
+  ],
+  "merged_body_inertia_com_root_kg_m2": [
+    [
+      0.02763296312223839,
+      -3.661368078366526e-10,
+      -0.004007687457694751
+    ],
+    [
+      -3.661368078366526e-10,
+      0.021896504135653756,
+      7.562830708086174e-10
+    ],
+    [
+      -0.004007687457694751,
+      7.562830708086174e-10,
+      0.014083413129687333
+    ]
+  ],
+  "merge_fixed_joints_required": false
+}
