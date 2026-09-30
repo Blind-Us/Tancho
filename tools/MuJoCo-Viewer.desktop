@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MuJoCo Viewer
+Name[zh_TW]=MuJoCo 模型檢視器
+Comment=Select and open a MuJoCo XML or MJCF model
+Comment[zh_TW]=選擇並開啟 MuJoCo XML 或 MJCF 模型
+Exec=/media/azul/861896C11896B023/Tancho/tools/launch_mujoco_viewer.sh
+Icon=/media/azul/861896C11896B023/Tancho/tools/mujoco-official.png
+Terminal=false
+Categories=Development;Science;Education;
+StartupNotify=true

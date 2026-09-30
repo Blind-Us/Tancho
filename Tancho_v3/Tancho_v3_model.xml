@@ -1,0 +1,85 @@
+<mujoco model="Tancho_v3">
+  <compiler angle="radian"/>
+
+  <asset>
+    <mesh name="base_link" content_type="model/stl" file="meshes/base_link.stl"/>
+    <mesh name="base_link001" content_type="model/stl" file="meshes/base_link001.stl"/>
+    <mesh name="base_link002" content_type="model/stl" file="meshes/base_link002.stl"/>
+    <mesh name="drawer" content_type="model/stl" file="meshes/drawer.stl"/>
+    <mesh name="pi_case" content_type="model/stl" file="meshes/pi_case.stl"/>
+    <mesh name="joint_thigh_L" content_type="model/stl" file="meshes/joint_thigh_L.stl"/>
+    <mesh name="thigh_L" content_type="model/stl" file="meshes/thigh_L.stl"/>
+    <mesh name="knee_cover_L" content_type="model/stl" file="meshes/knee_cover_L.stl"/>
+    <mesh name="joint_knee_L" content_type="model/stl" file="meshes/joint_knee_L.stl"/>
+    <mesh name="calf_L" content_type="model/stl" file="meshes/calf_L.stl"/>
+    <mesh name="joint_wheel_L" content_type="model/stl" file="meshes/joint_wheel_L.stl"/>
+    <mesh name="wheel_L" content_type="model/stl" file="meshes/wheel_L.stl"/>
+    <mesh name="wheel_tpu" content_type="model/stl" file="meshes/wheel_tpu.stl"/>
+    <mesh name="joint_thigh_R" content_type="model/stl" file="meshes/joint_thigh_R.stl"/>
+    <mesh name="thigh_R" content_type="model/stl" file="meshes/thigh_R.stl"/>
+    <mesh name="knee_cover_R" content_type="model/stl" file="meshes/knee_cover_R.stl"/>
+    <mesh name="joint_knee_R" content_type="model/stl" file="meshes/joint_knee_R.stl"/>
+    <mesh name="calf_R" content_type="model/stl" file="meshes/calf_R.stl"/>
+    <mesh name="joint_wheel_R" content_type="model/stl" file="meshes/joint_wheel_R.stl"/>
+    <mesh name="wheel_R" content_type="model/stl" file="meshes/wheel_R.stl"/>
+  </asset>
+
+  <worldbody>
+    <geom quat="0.707107 0.707107 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="base_link"/>
+    <geom quat="0.707107 0.707107 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="base_link001"/>
+    <geom quat="0.707107 0.707107 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="base_link002"/>
+    <geom name="base_link_collision_box" size="0.09 0.045608 0.06" pos="0 0 -9.3e-05" quat="0.707107 0.707107 0 0" type="box"/>
+    <geom pos="-0.01 -1.77132e-12 0.000552656" quat="0.707107 0.707107 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="drawer"/>
+    <geom name="drawer_collision_box" size="0.070649 0.0325 0.027497" pos="-0.032449 -9.78408e-12 0.00305266" quat="0.707107 0.707107 0 0" type="box"/>
+    <geom pos="-0.01 -1.77131e-12 0.000552656" quat="0.707107 0.707107 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="pi_case"/>
+    <geom name="pi_case_collision_box" size="0.0518 0.0125 0.0328" pos="0.0132 -1.54014e-10 0.0480527" quat="0.707107 0.707107 0 0" type="box"/>
+    <body name="thigh_L" pos="0.0192386 0.0539954 0.000552656" quat="0.707107 0.707107 0 0">
+      <inertial pos="-0.00043085 -0.141191 -0.015584" quat="0.504996 0.468108 -0.480076 0.54349" mass="0.3805" diaginertia="0.000569017 0.000547292 0.000166267"/>
+      <joint name="joint_thigh_L" range="-1.57 1.57" actuatorfrcrange="-12.5 12.5"/>
+      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="joint_thigh_L"/>
+      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="thigh_L"/>
+      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="knee_cover_L"/>
+      <geom name="thigh_L_collision_box" size="0.037994 0.108496 0.005" pos="-4e-06 -0.079502 -0.028005" type="box"/>
+      <geom name="knee_cover_L_collision_cylinder" size="0.038 0.02" pos="0 -0.15 -0.003005" type="cylinder"/>
+      <body name="calf_L" pos="0 -0.15 -0.016">
+        <inertial pos="0.000327897 -0.0880791 -0.0416417" quat="0.443653 0.530631 -0.561151 0.454657" mass="0.1499" diaginertia="0.000169627 0.000161788 3.14264e-05"/>
+        <joint name="joint_calf_L" range="0 3" actuatorfrcrange="-12.5 12.5"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="joint_knee_L"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="calf_L"/>
+        <geom name="calf_L_collision_mesh" type="mesh" mesh="calf_L"/>
+        <geom name="joint_wheel_L_stator_visual" pos="0 -0.0999975 -0.0455046" quat="1.7949e-09 1 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="joint_wheel_L"/>
+        <body name="wheel_L" pos="0 -0.0999975 -0.0455046" quat="1.7949e-09 1 0 0">
+          <inertial pos="-4.14921e-08 2.51192e-06 0.0081268" quat="0.229336 0.668883 -0.229336 0.668883" mass="0.0349" diaginertia="2.71552e-05 1.46621e-05 1.4662e-05"/>
+          <joint name="joint_wheel_L" actuatorfrcrange="-0.45 0.45"/>
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="wheel_L"/>
+          <geom name="tpu_canonical_L_visual" pos="0 0 0.007" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="wheel_tpu"/>
+          <geom name="wheel_L_round_tire_collision" size="0.03614 0.0085" pos="0 0 0.007" type="cylinder"/>
+        </body>
+      </body>
+    </body>
+    <body name="thigh_R" pos="0.0192386 -0.0539954 0.000552656" quat="0.707107 0.707107 0 0">
+      <inertial pos="-0.000430845 -0.141191 0.015584" quat="0.480076 0.54349 -0.504996 0.468107" mass="0.3805" diaginertia="0.000569017 0.000547292 0.000166267"/>
+      <joint name="joint_thigh_R" range="-1.57 1.57" actuatorfrcrange="-12.5 12.5"/>
+      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="joint_thigh_R"/>
+      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="thigh_R"/>
+      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="knee_cover_R"/>
+      <geom name="thigh_R_collision_box" size="0.037994 0.108496 0.005" pos="-4e-06 -0.079502 0.028005" type="box"/>
+      <geom name="knee_cover_R_collision_cylinder" size="0.038 0.02" pos="0 -0.15 0.003005" type="cylinder"/>
+      <body name="calf_R" pos="0 -0.15 0.016">
+        <inertial pos="0.000327897 -0.0880791 0.0416417" quat="0.561151 0.454657 -0.443653 0.530631" mass="0.1499" diaginertia="0.000169627 0.000161788 3.14264e-05"/>
+        <joint name="joint_calf_R" range="0 3" actuatorfrcrange="-12.5 12.5"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="joint_knee_R"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="calf_R"/>
+        <geom name="calf_R_collision_mesh" type="mesh" mesh="calf_R"/>
+        <geom name="joint_wheel_R_stator_visual" pos="0 -0.0999975 0.0455046" quat="1.7949e-09 1 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="joint_wheel_R"/>
+        <body name="wheel_R" pos="0 -0.0999975 0.0455046" quat="1.7949e-09 1 0 0">
+          <inertial pos="4.21765e-08 2.42605e-06 -0.00812679" quat="-0.226339 0.669903 0.226339 0.669903" mass="0.0349" diaginertia="2.71551e-05 1.46621e-05 1.4662e-05"/>
+          <joint name="joint_wheel_R" actuatorfrcrange="-0.45 0.45"/>
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="wheel_R"/>
+          <geom name="tpu_canonical_R_visual" pos="0 0 -0.007" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="wheel_tpu"/>
+          <geom name="wheel_R_round_tire_collision" size="0.03614 0.0085" pos="0 0 -0.007" type="cylinder"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

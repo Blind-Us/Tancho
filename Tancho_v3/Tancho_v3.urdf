@@ -1,5 +1,9 @@
 <?xml version='1.0' encoding='utf-8'?>
 <robot name="Tancho_v3">
+  <!-- Keep visual-only meshes when MuJoCo imports this URDF. -->
+  <mujoco>
+    <compiler discardvisual="false" />
+  </mujoco>
   <link name="base_link_root" />
   <link name="base_link">
     <inertial>
