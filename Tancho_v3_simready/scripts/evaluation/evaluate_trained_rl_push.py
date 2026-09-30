@@ -309,7 +309,7 @@ def main() -> None:
         # PhysX wraps continuous-joint angles to [-2*pi, 2*pi]: accumulate unwrapped increments.
         raw = robot.data.joint_pos
         step_delta = torch.remainder(raw - wheel_prev + 2.0 * math.pi, 4.0 * math.pi) - 2.0 * math.pi
-        wheel_travel += step_delta.mean(dim=1, keepdim=True)
+        wheel_travel.add_(step_delta.mean(dim=1, keepdim=True))
         wheel_prev.copy_(raw)
         fields = {
             "pitch_deg": pitch[:, None],
