@@ -306,6 +306,11 @@ def main() -> None:
         yaw = yaw_wxyz(quat)
         yaw_change = torch.atan2(torch.sin(yaw - yaw0), torch.cos(yaw - yaw0))
         qd = robot.data.joint_vel
+        # PhysX wraps continuous-joint angles to [-2*pi, 2*pi]: accumulate unwrapped increments.
+        raw = robot.data.joint_pos
+        step_delta = torch.remainder(raw - wheel_prev + 2.0 * math.pi, 4.0 * math.pi) - 2.0 * math.pi
+        wheel_travel += step_delta.mean(dim=1, keepdim=True)
+        wheel_prev.copy_(raw)
         fields = {
             "pitch_deg": pitch[:, None],
             "yaw_deg": torch.rad2deg(yaw_wxyz(quat))[:, None],
@@ -317,7 +322,7 @@ def main() -> None:
             "displacement_m": torch.linalg.vector_norm(rel, dim=1, keepdim=True),
             "forward_displacement_m": (rel * heading0).sum(dim=1, keepdim=True),
             "forward_velocity_m_s": (robot.data.root_lin_vel_w[:, :2] * heading0).sum(dim=1, keepdim=True),
-            "odometry_displacement_m": WHEEL_RADIUS_M * (robot.data.joint_pos.mean(dim=1, keepdim=True) - wheel0),
+            "odometry_displacement_m": WHEEL_RADIUS_M * wheel_travel,
             "yaw_change_deg": torch.rad2deg(yaw_change)[:, None],
             "yaw_rate_rad_s": robot.data.root_ang_vel_w[:, 2:3],
             "wheel_speed_diff_rad_s": qd[:, 1:2] - qd[:, 0:1],
@@ -371,7 +376,8 @@ def main() -> None:
     zero_force = torch.zeros(len(FORCES_N), device=core.device)
     pos0 = (robot.data.root_link_pos_w - core.scene.env_origins).clone()
     yaw0 = yaw_wxyz(robot.data.root_link_quat_w).clone()
-    wheel0 = robot.data.joint_pos.mean(dim=1, keepdim=True).clone()
+    wheel_prev = robot.data.joint_pos.clone()
+    wheel_travel = torch.zeros(len(FORCES_N), 1, device=core.device)
     heading0_w = torch.stack((torch.cos(yaw0), torch.sin(yaw0), torch.zeros_like(yaw0)), dim=1)
     push_angle = math.radians(PUSH_ANGLE_DEG)
     push_dir_w = torch.stack(
