@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train ``TanchoV3-WheelOnly-Flat-v0`` with RSL-RL.
+"""Train the staged Tancho V3 tasks (``tasks/staged``) with RSL-RL.
 
 Based on Isaac Lab's ``scripts/reinforcement_learning/rsl_rl/train.py``.  The
 project's ``scripts/rsl_rl/train.py`` is not used because its legacy-config
@@ -10,7 +10,13 @@ Additions over the stock script:
   * registers the Tancho tasks (``import tancho_v3_lab.tasks``);
   * refuses to train when files that define this task are uncommitted, and writes
     the Tancho commit hash to ``<log_dir>/git_commit.txt`` (and the run name);
+  * ``--init_checkpoint``: start from another run's weights (stage 2 -> 3);
   * exports ``exported/policy.pt`` (TorchScript) and ``policy.onnx`` at the end.
+
+    python scripts/wheel_only/train.py --headless --task TanchoV3-WheelOnly-Flat-v0
+    python scripts/wheel_only/train.py --headless --task TanchoV3-Stand-Flat-v0
+    python scripts/wheel_only/train.py --headless --task TanchoV3-Walk-Flat-v0 \
+        --init_checkpoint logs/rsl_rl/tancho_v3_stand/<run>/model_final.pt
 """
 
 import argparse
@@ -27,7 +33,9 @@ import cli_args  # noqa: E402  isort: skip
 REPO_DIR = Path(__file__).resolve().parents[2]
 # Everything that defines the task, its asset and this training entry point.
 TRACKED_PATHS = [
-    "source/tancho_v3_lab/tancho_v3_lab/tasks/wheel_only",
+    "source/tancho_v3_lab/tancho_v3_lab/tasks/staged",
+    "source/tancho_v3_lab/tancho_v3_lab/tasks/direct/tancho_v3/custom_events.py",
+    "source/tancho_v3_lab/tancho_v3_lab/tasks/direct/tancho_v3/custom_rewards.py",
     "source/tancho_v3_lab/tancho_v3_lab/tasks/__init__.py",
     "source/tancho_v3_lab/tancho_v3_lab/assets/robots/Tancho_v3/urdf/Tancho_v3_wheel_only.urdf",
     "source/tancho_v3_lab/tancho_v3_lab/assets/robots/Tancho_v3/urdf/Tancho_v3_wheel_only.json",
@@ -41,6 +49,7 @@ parser.add_argument("--task", type=str, default="TanchoV3-WheelOnly-Flat-v0")
 parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point")
 parser.add_argument("--seed", type=int, default=None)
 parser.add_argument("--max_iterations", type=int, default=None)
+parser.add_argument("--init_checkpoint", type=str, default=None, help="Model weights to start from; iteration count restarts at 0.")
 parser.add_argument("--allow-dirty", action="store_true", help="Train even if task files are uncommitted.")
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
@@ -87,6 +96,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
     agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, metadata.version("rsl-rl-lib"))
     env_cfg.seed = agent_cfg.seed
     env_cfg.sim.device = args_cli.device or env_cfg.sim.device
+    agent_cfg.device = args_cli.device or agent_cfg.device
 
     short = COMMIT[:7] + ("-dirty" if DIRTY else "")
     agent_cfg.run_name = f"{agent_cfg.run_name}_{short}" if agent_cfg.run_name else short
@@ -103,6 +113,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
     runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
     runner.add_git_repo_to_log(__file__)
+    if args_cli.init_checkpoint:
+        runner.load(args_cli.init_checkpoint, load_cfg={"actor": True, "critic": True})
+        with open(os.path.join(log_dir, "git_commit.txt"), "a") as stream:
+            stream.write(f"init_checkpoint {os.path.abspath(args_cli.init_checkpoint)}\n")
+        print(f"[INFO] Initialized from {args_cli.init_checkpoint}")
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)

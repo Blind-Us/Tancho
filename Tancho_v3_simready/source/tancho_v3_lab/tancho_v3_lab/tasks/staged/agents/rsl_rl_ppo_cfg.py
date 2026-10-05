@@ -9,7 +9,7 @@ class TanchoV3WheelOnlyPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     save_interval = 50
     experiment_name = "tancho_v3_wheel_only"
     clip_actions = 1.0
-    # Actor sees only the 10-D hardware observation; critic gets privileged state.
+    # Actor sees only the hardware observation; critic gets privileged state.
     obs_groups = {"actor": ["policy"], "critic": ["critic"]}
     actor = RslRlMLPModelCfg(
         hidden_dims=[128, 128, 64],
@@ -36,3 +36,16 @@ class TanchoV3WheelOnlyPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+
+
+@configclass
+class TanchoV3StandPPORunnerCfg(TanchoV3WheelOnlyPPORunnerCfg):
+    max_iterations = 3000
+    experiment_name = "tancho_v3_stand"
+
+
+@configclass
+class TanchoV3WalkPPORunnerCfg(TanchoV3WheelOnlyPPORunnerCfg):
+    # Started from a stage-2 checkpoint with ``train.py --init_checkpoint``.
+    max_iterations = 3000
+    experiment_name = "tancho_v3_walk"
