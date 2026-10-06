@@ -115,6 +115,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
     runner.add_git_repo_to_log(__file__)
     if args_cli.init_checkpoint:
         runner.load(args_cli.init_checkpoint, load_cfg={"actor": True, "critic": True})
+        # Restart the observation statistics.  The stand checkpoint saw a zero
+        # command for ~3e8 samples, so its command std is 0 and the running
+        # average would need ~1e9 walk samples to catch up: a 0.3 m/s command
+        # was normalized to ~4 instead of ~0.9 and the policy overshot to 1 m/s.
+        # With count 0 the first batch replaces mean/var, then they keep updating.
+        for model in (runner.alg.actor, runner.alg.critic):
+            if hasattr(model.obs_normalizer, "count"):
+                model.obs_normalizer.count.zero_()
         with open(os.path.join(log_dir, "git_commit.txt"), "a") as stream:
             stream.write(f"init_checkpoint {os.path.abspath(args_cli.init_checkpoint)}\n")
         print(f"[INFO] Initialized from {args_cli.init_checkpoint}")
