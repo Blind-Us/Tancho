@@ -42,7 +42,9 @@ class WheelOnlyRewardsCfg:
     ang_vel_z = RewTerm(func=mdp.track_ang_vel_z_exp, weight=0.5, params={"command_name": _COMMAND, "std": 0.25})
     # L1 keeps a constant pull toward exactly zero wheel speed, which the exp
     # term above does not (its gradient vanishes at 0).  Removes slow drift.
-    wheel_vel_l1 = RewTerm(func=mdp.joint_vel_l1, weight=-0.02, params={"asset_cfg": WHEELS})
+    # At -0.02 the wheel-only policy crept at a steady 0.74 rad/s (2.7 cm/s,
+    # 53 cm in 20 s) for 0.03/s; -0.2 makes that creep cost 0.3/s.
+    wheel_vel_l1 = RewTerm(func=mdp.joint_vel_l1, weight=-0.2, params={"asset_cfg": WHEELS})
     # Effort normalized by the peak: both wheels saturated costs 0.02/s.
     wheel_torque = RewTerm(func=mdp.joint_torques_l2, weight=-0.01 / WHEEL_EFFORT_LIMIT_NM**2, params={"asset_cfg": WHEELS})
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
