@@ -21,6 +21,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -138,11 +139,18 @@ def main() -> int:
         writer.writerows(rows)
     (out / "stand_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
-    env.close()
     return 0 if summary["pass_all"] else 1
 
 
 if __name__ == "__main__":
-    code = main()
-    simulation_app.close()
-    sys.exit(code)
+    code = 1
+    try:
+        code = main()
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+    # SimulationApp.close() swallows the output and can hang; exit hard (same as evaluate_standstill.py).
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
