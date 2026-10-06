@@ -51,7 +51,10 @@ class WasdKeyboard:
         self._sub = self._input.subscribe_to_keyboard_events(self._keyboard, self._on_event)
 
     def _on_event(self, event, *args, **kwargs) -> bool:
-        name = event.input.name
+        # CHAR events carry the typed character as a plain str; only key press/release matter here.
+        if event.type not in (carb.input.KeyboardEventType.KEY_PRESS, carb.input.KeyboardEventType.KEY_RELEASE):
+            return True
+        name = event.input if isinstance(event.input, str) else event.input.name
         if event.type == carb.input.KeyboardEventType.KEY_PRESS:
             if name in MOVE_KEYS:
                 self.held.add(name)
