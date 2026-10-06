@@ -91,3 +91,8 @@ class FullWalkRewardsCfg(FullStandRewardsCfg):
         self.ang_vel_z.params["std"] = 0.5
         # Pulling the wheels toward zero speed fights every non-zero command.
         self.wheel_vel_l1 = None
+        # The capture point leads the COM by v/sqrt(g/h) (4.3 cm at 0.3 m/s), so in
+        # steady rolling it sits ahead of the axle and the term charges for speed:
+        # the first walk policy held only ~60% of the commanded vx.  Kept at 0 so
+        # the log columns stay comparable.
+        self.capture_point.weight = 0.0
