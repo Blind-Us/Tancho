@@ -13,7 +13,7 @@ upright reset, one robot.
 from __future__ import annotations
 
 import isaaclab.envs.mdp as mdp
-from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.envs import ManagerBasedRLEnvCfg, ViewerCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
@@ -140,6 +140,8 @@ def _to_play(cfg: ManagerBasedRLEnvCfg) -> None:
     cfg.events.reset_base.params["pose_range"] = {}
     cfg.events.reset_base.params["velocity_range"] = {}
     cfg.events.push_robot = None
+    # Camera follows the robot from 1 m away (the default 7.5 m eye leaves a dot).
+    cfg.viewer = ViewerCfg(eye=(0.7, 0.7, 0.35), lookat=(0.0, 0.0, 0.15), origin_type="asset_root", asset_name="robot")
 
 
 @configclass

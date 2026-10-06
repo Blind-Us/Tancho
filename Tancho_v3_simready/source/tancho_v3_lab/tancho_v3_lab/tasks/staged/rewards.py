@@ -68,7 +68,11 @@ class FullStandRewardsCfg(WheelOnlyRewardsCfg):
         },
     )
     # Tancho is mirror-symmetric; equal pose means equal q on both sides.
-    mirror = RewTerm(func=cr.mirror_leg_l2, weight=-0.5)
+    # mirror_leg_l2 = 0.5*(dthigh^2 + dcalf^2): 0.1 rad on both pairs costs 0.2/s.
+    # (-0.5 cost only 0.005/s there and left a 0.06-0.11 rad split after a push.)
+    mirror = RewTerm(func=cr.mirror_leg_l2, weight=-20.0)
+    # Return to the nominal leg pose after a disturbance: 0.1 rad on all four joints costs 0.4/s.
+    leg_deviation = RewTerm(func=mdp.joint_deviation_l1, weight=-1.0, params={"asset_cfg": LEGS})
     # Same normalization as the wheels: 100% leg torque costs the same per joint.
     leg_torque = RewTerm(func=mdp.joint_torques_l2, weight=-0.01 / LEG_EFFORT_LIMIT_NM**2, params={"asset_cfg": LEGS})
     leg_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7, params={"asset_cfg": LEGS})
