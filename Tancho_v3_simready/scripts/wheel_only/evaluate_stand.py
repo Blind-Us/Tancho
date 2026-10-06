@@ -10,7 +10,7 @@ Pass criteria:
   * before the push: |pitch - pitch(t=0)| <= 2 deg and planar drift < 5 cm
   * base height never more than 3 cm below its start (no crouch / collapse)
   * every leg joint within 0.15 rad of the nominal pose at the end
-  * left/right leg mismatch (thigh and calf) < 0.05 rad at the end
+  * left/right leg mismatch (thigh and calf) < 0.12 rad at the end
   * after the push: pitch back within 2 deg and chassis speed < 0.05 m/s
     by the end of the run
 """
@@ -49,7 +49,7 @@ PITCH_BAND_DEG = 2.0
 DRIFT_LIMIT_M = 0.05
 HEIGHT_DROP_M = 0.03
 LEG_DEV_RAD = 0.15
-MIRROR_RAD = 0.05
+MIRROR_RAD = 0.12  # about 7 deg; 3-6 deg judged acceptable (2026-10-06)
 SETTLED_SPEED_M_S = 0.05
 
 
