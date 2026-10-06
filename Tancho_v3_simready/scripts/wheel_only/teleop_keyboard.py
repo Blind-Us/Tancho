@@ -58,6 +58,7 @@ class WasdKeyboard:
         if event.type == carb.input.KeyboardEventType.KEY_PRESS:
             if name in MOVE_KEYS:
                 self.held.add(name)
+                print(f"[teleop] {name} down", flush=True)
             elif name in SPEED_LEVELS:
                 self.vx_max, self.wz_max = SPEED_LEVELS[name]
                 print(f"[teleop] speed level: vx {self.vx_max} m/s, yaw {self.wz_max} rad/s", flush=True)
