@@ -36,6 +36,7 @@ parser.add_argument("--vx", type=float, default=0.4)
 parser.add_argument("--duration", type=float, default=12.0)
 parser.add_argument("--min-steps", type=int, default=3)
 parser.add_argument("--step-height", type=float, default=0.03)
+parser.add_argument("--guidance", type=float, default=None, help="Climb tasks: reference-lift guidance scale (deployment: 0)")
 parser.add_argument("--output-dir", type=Path, default=None)
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
@@ -65,6 +66,8 @@ def run(direction: str) -> tuple[dict, list[dict]]:
     gen = play_generator(STEP_GENERATOR, sub, 1.0, size=8.0)
     gen.sub_terrains[sub].step_height_range = (args.step_height, args.step_height)
     cfg.scene.terrain = make_terrain(gen, max_init_level=None)
+    if args.guidance is not None:
+        cfg.actions.leg_pos.guidance_scale = args.guidance
     env = gym.make(args.task, cfg=cfg)
     core = env.unwrapped
     robot = core.scene["robot"]
