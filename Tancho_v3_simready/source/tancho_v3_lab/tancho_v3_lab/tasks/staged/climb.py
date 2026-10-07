@@ -11,8 +11,7 @@ simulated operator presses the triggers:
   (never an actor input) finds a rise > ``rise_threshold`` ahead of a wheel
   while the robot is commanded forward.  When the edge comes within a per-env
   random look-ahead distance (an early or late human), the trigger on that
-  wheel's side is pressed and held while the edge is ahead, plus
-  ``hold_s``.  A square approach shows the edge to both wheels at once -> hop;
+  wheel's side is pressed and held for ``hold_s`` (one press per edge, then ``cooldown_s``).  A square approach shows the edge to both wheels at once -> hop;
   a diagonal approach reaches one wheel first -> single-leg lift.
 * Random: occasional presses (L, R or both, 0.2-0.5 s) anywhere, so a press on
   flat ground must not cause a fall.
@@ -35,7 +34,7 @@ from isaaclab.utils import configclass
 from isaaclab.utils.math import quat_apply_inverse, yaw_quat
 
 from ..direct.tancho_v3 import custom_rewards as cr
-from .scene import WHEEL_RADIUS_M
+from .scene import FULL_ROOT_HEIGHT_M, WHEEL_RADIUS_M
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -84,6 +83,7 @@ class ClimbTriggerCommand(CommandTerm):
         self.random_timer = torch.zeros(n, device=dev)
         self.hold_mode = torch.zeros(n, 2, device=dev)
         self.hold_timer = torch.zeros(n, 2, device=dev)
+        self.cooldown = torch.zeros(n, 2, device=dev)
         self.recent_timer = torch.zeros(n, device=dev)
         self.lookahead = torch.full((n,), sum(cfg.lookahead_range) / 2, device=dev)
         self.attentive = torch.ones(n, dtype=torch.bool, device=dev)
@@ -125,7 +125,12 @@ class ClimbTriggerCommand(CommandTerm):
         rise = z_ahead - ground
         vx_cmd = self._env.command_manager.get_command(self.cfg.velocity_command_name)[:, 0]
         need = (rise > self.cfg.rise_threshold) & (vx_cmd > 0.05).unsqueeze(1) & self.attentive.unsqueeze(1)
-        self.hold_timer = torch.where(need, torch.full_like(self.hold_timer, self.cfg.hold_s), (self.hold_timer - dt).clamp(min=0.0))
+        # One press per edge: hold for hold_s, then a cooldown before the same side can
+        # fire again (otherwise a robot parked at an edge keeps the trigger held and
+        # could farm the lift rewards).
+        fire = need & (self.hold_timer <= 0.0) & (self.cooldown <= 0.0)
+        self.hold_timer = torch.where(fire, torch.full_like(self.hold_timer, self.cfg.hold_s), (self.hold_timer - dt).clamp(min=0.0))
+        self.cooldown = torch.where(fire, torch.full_like(self.cooldown, self.cfg.hold_s + self.cfg.cooldown_s), (self.cooldown - dt).clamp(min=0.0))
         auto = (self.hold_timer > 0.0).float()
         # -- random presses
         rnd = self.random_mode * (self.random_timer > 0.0).float().unsqueeze(1)
@@ -138,6 +143,7 @@ class ClimbTriggerCommand(CommandTerm):
         ids = slice(None) if env_ids is None else env_ids
         self.trigger[ids] = 0.0
         self.hold_timer[ids] = 0.0
+        self.cooldown[ids] = 0.0
         self.recent_timer[ids] = 0.0
         return super().reset(env_ids)
 
@@ -152,7 +158,8 @@ class ClimbTriggerCommandCfg(CommandTermCfg):
     """A rise above this (m) ahead of a wheel counts as a step (rough bumps peak at 2 cm p-p, mostly below)."""
     lookahead_range: tuple[float, float] = (0.08, 0.30)
     """Distance ahead of the wheel contact at which the operator presses (m)."""
-    hold_s: float = 0.3
+    hold_s: float = 0.4
+    cooldown_s: float = 0.8
     recent_s: float = 0.6
     auto_prob: float = 0.9
     random_press_prob: float = 0.4
@@ -166,6 +173,25 @@ def wheel_lift_on_trigger(env: ManagerBasedRLEnv, command_name: str = "climb", s
     dx, dy, hit_z, wheel_z = _wheel_scan(env, sensor_name)
     clearance = (wheel_z - WHEEL_RADIUS_M - _ground_under(dx, dy, hit_z)).clamp(0.0, max_clearance) / max_clearance
     return (trig * clearance).sum(dim=1)
+
+
+# Wheel axle below the root (base frame) at the nominal leg pose.
+NOMINAL_WHEEL_DROP_M = FULL_ROOT_HEIGHT_M - WHEEL_RADIUS_M
+
+
+def wheel_retract_on_trigger(env: ManagerBasedRLEnv, command_name: str = "climb", max_retract: float = 0.05) -> torch.Tensor:
+    """Dense shaping for the lift: how far the pressed side's axle has been pulled up toward
+    the body (base frame) relative to the nominal pose, normalized at ``max_retract``.
+    Gives gradient before the tire leaves the ground."""
+    trig = env.command_manager.get_command(command_name)
+    robot = env.scene["robot"]
+    if not hasattr(env, "_climb_wheel_ids"):
+        env._climb_wheel_ids = robot.find_bodies(WHEEL_BODIES, preserve_order=True)[0]
+    rel = robot.data.body_pos_w[:, env._climb_wheel_ids] - robot.data.root_pos_w.unsqueeze(1)
+    q = robot.data.root_quat_w.repeat_interleave(2, dim=0)
+    drop = -quat_apply_inverse(q, rel.reshape(-1, 3)).reshape(-1, 2, 3)[..., 2]
+    retract = (NOMINAL_WHEEL_DROP_M - drop).clamp(0.0, max_retract) / max_retract
+    return (trig * retract).sum(dim=1)
 
 
 def _free(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:

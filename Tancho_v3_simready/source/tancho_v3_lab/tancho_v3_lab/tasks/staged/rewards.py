@@ -105,6 +105,9 @@ class ClimbRewardsCfg(FullWalkRewardsCfg):
 
     # Pressed side's tire clearance, 5 cm = full credit: a 0.4 s full lift earns 0.8.
     wheel_lift = RewTerm(func=climb.wheel_lift_on_trigger, weight=2.0)
+    # Dense shaping toward the lift: axle pulled 5 cm toward the body = full credit.
+    # (Run 1 with clearance only: wheel_lift stayed ~0 and the action std collapsed to 0.02.)
+    wheel_retract = RewTerm(func=climb.wheel_retract_on_trigger, weight=2.0)
 
     def __post_init__(self):
         super().__post_init__()
