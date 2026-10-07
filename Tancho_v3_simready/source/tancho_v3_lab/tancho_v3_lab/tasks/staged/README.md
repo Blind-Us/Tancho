@@ -15,7 +15,7 @@
 
 階段 4/5 用 `terrain.py` 的課程：撐到 time-out 且速度追蹤 > 60% 升級，跌倒降級。
 驗收：`evaluate_walk.py --task TanchoV3-Walk-Rough-Play-v0`、`evaluate_step.py --direction up|down`。
-階段 6（`climb.py`）：Xbox LT 抬左腳、RT 抬右腳、LT+RT 短跳。6A 在參考動作疊加下單腳 37–43 mm、短跳 33 mm 不倒；6B 上台階在 2026-10-07 未成功（policy 一律學成「開慢、躲邊緣」），細節見 `logs/rsl_rl/PROGRESS.md`。
+階段 6（`climb.py`）：Xbox LT 抬左腳、RT 抬右腳、LT+RT 短跳。6A 在參考動作疊加下單腳 37–43 mm、短跳 33 mm 不倒（GUI 試玩：`teleop_keyboard.py` 的 Q / E / J；連續兩次短跳會倒，訓練沒練過連跳）；6B 上台階在 2026-10-07 未成功（policy 一律學成「開慢、躲邊緣」），細節見 `logs/rsl_rl/PROGRESS.md`。
 
 2026-10-07 結果：rough 通過（release `releases/tancho_v3_rough_v1`）；上台階受輪徑/摩擦限制只到約 5 mm（準靜態上限 r(1−cos33°) ≈ 5.7 mm），下 3 cm 沒問題。
 
