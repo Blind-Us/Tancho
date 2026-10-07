@@ -324,7 +324,10 @@ class TanchoV3ClimbFreePlayEnvCfg(TanchoV3ClimbPlayEnvCfg):
 @configclass
 class HopCommandsCfg(WalkCommandsCfg):
     # A random press (L, R or both, 0.2-0.5 s) about every 3 s; no auto presses.
-    climb = ClimbTriggerCommandCfg(random_press_prob=0.8, auto_prob=0.0)
+    # v2: half of the presses are followed by another 0.1-0.8 s after release (double
+    # hops, L-R shuffles: the v1 policy fell on a double hop it never trained), and a
+    # "both" press is up to 60 ms out of sync between the two triggers.
+    climb = ClimbTriggerCommandCfg(random_press_prob=0.8, auto_prob=0.0, burst_prob=0.5, both_skew_s=0.06)
 
 
 @configclass
@@ -354,3 +357,6 @@ class TanchoV3ClimbHopPlayEnvCfg(TanchoV3ClimbHopEnvCfg):
         self.curriculum = None
         self.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, "flat", 0.0, size=16.0), max_init_level=None)
         self.actions.leg_pos.guidance_scale = 0.0
+        # Presses come from the script / keyboard only.
+        self.commands.climb.burst_prob = 0.0
+        self.commands.climb.both_skew_s = 0.0

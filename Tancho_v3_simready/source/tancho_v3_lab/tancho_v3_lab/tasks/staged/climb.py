@@ -54,6 +54,7 @@ REF_T_PUSH = 0.02
 REF_T_TUCK_END = 0.22
 REF_T_END = 0.40
 PHASE_CLIP_S = 0.6
+REF_LOCKOUT_S = REF_T_END - 1.0e-3  # float slack on the accumulated phase
 
 
 def reference_leg_offsets(phase: torch.Tensor) -> torch.Tensor:
@@ -106,11 +107,15 @@ class ClimbTriggerCommand(CommandTerm):
         self.trigger = torch.zeros(n, 2, device=dev)
         self.random_mode = torch.zeros(n, 2, device=dev)
         self.random_timer = torch.zeros(n, device=dev)
+        self.random_elapsed = torch.zeros(n, device=dev)
+        self.side_delay = torch.zeros(n, 2, device=dev)  # a human "LT+RT" is not simultaneous
+        self.burst_timer = torch.zeros(n, device=dev)  # > 0: a follow-up press is pending
         self.hold_mode = torch.zeros(n, 2, device=dev)
         self.hold_timer = torch.zeros(n, 2, device=dev)
         self.cooldown = torch.zeros(n, 2, device=dev)
         self.recent_timer = torch.zeros(n, device=dev)
-        self.phase = torch.full((n, 2), 10.0, device=dev)  # s since each side's rising edge
+        self.phase = torch.full((n, 2), 10.0, device=dev)  # s since each side's reference lift started
+        self.queued = torch.zeros(n, 2, dtype=torch.bool, device=dev)
         self.lookahead = torch.full((n,), sum(cfg.lookahead_range) / 2, device=dev)
         self.attentive = torch.ones(n, dtype=torch.bool, device=dev)
         self.metrics["press_auto"] = torch.zeros(n, device=dev)
@@ -144,7 +149,26 @@ class ClimbTriggerCommand(CommandTerm):
         mode = torch.stack([(mode_id != 1).float(), (mode_id != 0).float()], dim=1)
         self.random_mode[ids] = torch.where(start.unsqueeze(1), mode, self.random_mode[ids])
         dur = torch.empty(k, device=self.device).uniform_(*self.cfg.random_press_s)
-        self.random_timer[ids] = torch.where(start, dur, torch.zeros_like(dur))
+        self.random_timer[ids] = torch.where(start, dur, self.random_timer[ids])
+        self.random_elapsed[ids] = torch.where(start, torch.zeros_like(dur), self.random_elapsed[ids])
+        self.side_delay[ids] = torch.where(start.unsqueeze(1), self._sample_skew(k), self.side_delay[ids])
+
+    def _sample_skew(self, k: int) -> torch.Tensor:
+        """(k, 2) per-side start delay: one random side is late by up to ``both_skew_s``."""
+        skew = torch.rand(k, device=self.device) * self.cfg.both_skew_s
+        late = torch.randint(0, 2, (k,), device=self.device)
+        return torch.stack([skew * (late == 0), skew * (late == 1)], dim=1)
+
+    def _start_random_press(self, mask: torch.Tensor):
+        """Start a random L / R / both press now where ``mask``."""
+        k = self.num_envs
+        mode_id = torch.randint(0, 3, (k,), device=self.device)
+        mode = torch.stack([(mode_id != 1).float(), (mode_id != 0).float()], dim=1)
+        dur = torch.empty(k, device=self.device).uniform_(*self.cfg.random_press_s)
+        self.random_mode = torch.where(mask.unsqueeze(1), mode, self.random_mode)
+        self.random_timer = torch.where(mask, dur, self.random_timer)
+        self.random_elapsed = torch.where(mask, torch.zeros_like(dur), self.random_elapsed)
+        self.side_delay = torch.where(mask.unsqueeze(1), self._sample_skew(k), self.side_delay)
 
     def _update_command(self):
         dt = self._env.step_dt
@@ -169,12 +193,31 @@ class ClimbTriggerCommand(CommandTerm):
         self.hold_timer = torch.where(fire, torch.full_like(self.hold_timer, self.cfg.hold_s), (self.hold_timer - dt).clamp(min=0.0))
         self.cooldown = torch.where(fire, torch.full_like(self.cooldown, self.cfg.hold_s + self.cfg.cooldown_s), (self.cooldown - dt).clamp(min=0.0))
         auto = (self.hold_timer > 0.0).float()
-        # -- random presses
-        rnd = self.random_mode * (self.random_timer > 0.0).float().unsqueeze(1)
+        # -- random presses (with follow-up bursts: double hops, L-R-L shuffles)
+        due = (self.burst_timer > 0.0) & (self.burst_timer <= dt)
+        self.burst_timer = (self.burst_timer - dt).clamp(min=0.0)
+        self._start_random_press(due)
+        on = (self.random_timer > 0.0).unsqueeze(1) & (self.random_elapsed.unsqueeze(1) >= self.side_delay)
+        rnd = self.random_mode * on.float()
+        ending = (self.random_timer > 0.0) & (self.random_timer <= dt)
         self.random_timer = (self.random_timer - dt).clamp(min=0.0)
+        self.random_elapsed += dt
+        follow = ending & (torch.rand(self.num_envs, device=self.device) < self.cfg.burst_prob)
+        gap = torch.empty(self.num_envs, device=self.device).uniform_(*self.cfg.burst_gap_s)
+        self.burst_timer = torch.where(follow, gap, self.burst_timer)
         new = torch.maximum(auto, rnd)
-        rising = (new > 0.0) & (self.trigger <= 0.0)
-        self.phase = torch.where(rising, torch.zeros_like(self.phase), self.phase + dt)
+        # A rising edge starts that side's reference lift.  An edge while the previous
+        # lift is still running is queued (at most one) and starts it the moment the
+        # previous one ends, so a fast double tap gives two lifts 0.4 s apart instead of
+        # restarting mid-tuck (v1 fell on ~20% of double taps < 0.4 s apart).
+        # Pi: the same rule on the press timer.
+        edge = (new > 0.0) & (self.trigger <= 0.0)
+        self.phase = self.phase + dt
+        busy = self.phase < REF_LOCKOUT_S
+        self.queued = self.queued | (edge & busy)
+        start = (edge & ~busy) | (self.queued & ~busy)
+        self.queued = self.queued & ~start
+        self.phase = torch.where(start, torch.zeros_like(self.phase), self.phase)
         self.trigger = new
         pressed = self.trigger.max(dim=1).values > 0.0
         self.recent_timer = torch.where(pressed, torch.full_like(self.recent_timer, self.cfg.recent_s), (self.recent_timer - dt).clamp(min=0.0))
@@ -186,6 +229,9 @@ class ClimbTriggerCommand(CommandTerm):
         self.cooldown[ids] = 0.0
         self.recent_timer[ids] = 0.0
         self.phase[ids] = 10.0
+        self.queued[ids] = False
+        self.random_timer[ids] = 0.0
+        self.burst_timer[ids] = 0.0
         return super().reset(env_ids)
 
 
@@ -206,6 +252,11 @@ class ClimbTriggerCommandCfg(CommandTermCfg):
     auto_prob: float = 0.9
     random_press_prob: float = 0.4
     random_press_s: tuple[float, float] = (0.2, 0.5)
+    burst_prob: float = 0.0
+    """After a random press is released, chance of another one ``burst_gap_s`` later (chains)."""
+    burst_gap_s: tuple[float, float] = (0.1, 0.8)
+    both_skew_s: float = 0.0
+    """A "both" random press starts one side up to this much later (s)."""
 
 
 # -- action: legs with optional reference guidance -------------------------------------

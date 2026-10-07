@@ -28,6 +28,10 @@ parser.add_argument("--guidance", type=float, default=0.0)
 parser.add_argument("--vx", type=float, default=0.3)
 parser.add_argument("--repeats", type=int, default=2)
 parser.add_argument("--min-clear", type=float, default=0.02)
+parser.add_argument("--schedule", default="LT,RT,LT+RT", help="comma-separated presses, repeated --repeats times")
+parser.add_argument("--gap", type=float, default=3.0, help="s between rising edges (double jump: < 1)")
+parser.add_argument("--press-s", type=float, default=0.4, help="s each trigger is held")
+parser.add_argument("--yaw", type=float, default=0.0, help="yaw-rate command (rad/s)")
 parser.add_argument("--output", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
@@ -40,15 +44,16 @@ from isaaclab_tasks.utils import parse_env_cfg  # noqa: E402
 import tancho_v3_lab.tasks  # noqa: E402,F401
 from tancho_v3_lab.tasks.staged.scene import WHEEL_RADIUS_M  # noqa: E402
 
-PRESS_S, GAP_S, WINDOW_S = 0.4, 3.0, 0.6
+PRESS_S, GAP_S = args.press_s, args.gap
+WINDOW_S = min(0.6, GAP_S)
 MODES = {"LT": (1.0, 0.0), "RT": (0.0, 1.0), "LT+RT": (1.0, 1.0)}
 
 
 @torch.inference_mode()
 def main() -> int:
     cfg = parse_env_cfg(args.task, device=args.device, num_envs=1, use_fabric=True)
-    schedule = [m for _ in range(args.repeats) for m in MODES]
-    cfg.episode_length_s = 2.0 + GAP_S * len(schedule) + 2.0
+    schedule = [m for _ in range(args.repeats) for m in args.schedule.split(",")]
+    cfg.episode_length_s = 2.0 + GAP_S * len(schedule) + 5.0
     cfg.commands.base_velocity.resampling_time_range = (1.0e6, 1.0e6)
     cfg.commands.base_velocity.rel_standing_envs = 0.0
     r = cfg.commands.base_velocity.ranges
@@ -69,9 +74,9 @@ def main() -> int:
     ground = float(robot.data.body_pos_w[0, wheel_ids, 2].mean()) - WHEEL_RADIUS_M
     presses, terminated_at, t = [], None, 0.0
     starts = [2.0 + GAP_S * i for i in range(len(schedule))]
-    total = starts[-1] + GAP_S
+    total = starts[-1] + 3.0
     while t < total:
-        vel.vel_command_b[0] = torch.tensor([args.vx, 0.0, 0.0], device=core.device)
+        vel.vel_command_b[0] = torch.tensor([args.vx, 0.0, args.yaw], device=core.device)
         # Press through the command term's own random-press slot, so the trigger,
         # its phase and the observation follow exactly the training code path.
         k = round(t / dt)
@@ -102,6 +107,9 @@ def main() -> int:
         "checkpoint": str(args.checkpoint.resolve()),
         "guidance": args.guidance,
         "vx": args.vx,
+        "yaw": args.yaw,
+        "gap_s": GAP_S,
+        "press_s": PRESS_S,
         "terminated_at_s": terminated_at,
         "presses": presses,
         "pass_no_failure": terminated_at is None,
