@@ -12,10 +12,15 @@
 
 | 6A | `TanchoV3-ClimbHop-v0` | 6-DOF，腿 ±0.6 rad，觀測 29 維（+ LT/RT、按下後時間） | vx、yaw rate + Trigger | 平地按鍵抬腳/短跳不倒（參考動作疊加） |
 | 6B | `TanchoV3-Climb-v0` / `TanchoV3-ClimbFree-v0` | 同上 | 同上 | 按鍵上台階（固定連招 / 全權重）——**未完成** |
+| 6A v2 | `TanchoV3-ClimbHop-v0`（commit 3f4fab9 起） | 同 6A | 同上，按鍵含連按、雙鍵時間差 | 快速連跳/左右交替不倒（release `releases/tancho_v3_hop_v2`） |
+| 6A-free | `TanchoV3-ClimbHopFree-v0` | 同上 | 同上 | 參考動作降到 0——**失敗**：policy 不抬腳 |
+| 7 | `TanchoV3-Recover-v0` / `TanchoV3-RecoverWide-v0` | 同上 | 同上 | 從傾斜/倒地站起來（實驗中） |
 
 階段 4/5 用 `terrain.py` 的課程：撐到 time-out 且速度追蹤 > 60% 升級，跌倒降級。
 驗收：`evaluate_walk.py --task TanchoV3-Walk-Rough-Play-v0`、`evaluate_step.py --direction up|down`。
 階段 6（`climb.py`）：Xbox LT 抬左腳、RT 抬右腳、LT+RT 短跳。6A 在參考動作疊加下單腳 37–43 mm、短跳 33 mm 不倒（GUI 試玩：`teleop_keyboard.py` 的 Q / E / J；連續兩次短跳會倒，訓練沒練過連跳）；6B 上台階在 2026-10-07 未成功（policy 一律學成「開慢、躲邊緣」），細節見 `logs/rsl_rl/PROGRESS.md`。
+
+2026-10-08 hop v2：按鍵規則改成「某側抬腳動作（0.4 s）還沒做完時，新按鍵排隊，做完立刻接上；LT+RT 時若一側還在動作中，兩側一起等」（`climb.py` 的 `ClimbTriggerCommand`，Pi 端要照做）。壓力測試 `scripts/wheel_only/evaluate_hop_sweep.py`（618 種按法）倒地率 5.7% → 0.8%。部署規格見 `releases/tancho_v3_hop_v2/DEPLOY.md`。
 
 2026-10-07 結果：rough 通過（release `releases/tancho_v3_rough_v1`）；上台階受輪徑/摩擦限制只到約 5 mm（準靜態上限 r(1−cos33°) ≈ 5.7 mm），下 3 cm 沒問題。
 
