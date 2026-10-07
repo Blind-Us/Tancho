@@ -17,6 +17,7 @@ _STAGES = {
     "TanchoV3-Walk-Step": ("TanchoV3WalkStep", "TanchoV3WalkStepPPORunnerCfg"),
     "TanchoV3-Climb": ("TanchoV3Climb", "TanchoV3ClimbPPORunnerCfg"),
     "TanchoV3-ClimbHop": ("TanchoV3ClimbHop", "TanchoV3ClimbHopPPORunnerCfg"),
+    "TanchoV3-ClimbFree": ("TanchoV3ClimbFree", "TanchoV3ClimbFreePPORunnerCfg"),
 }
 
 for _task, (_cfg, _runner) in _STAGES.items():

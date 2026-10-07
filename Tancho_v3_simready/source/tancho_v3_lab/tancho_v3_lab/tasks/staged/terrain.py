@@ -137,9 +137,9 @@ CLIMB_GENERATOR = TerrainGeneratorCfg(
             proportion=0.15, amplitude_range=(0.0, 0.02), noise_range=(0.0, 0.0), noise_step=0.001,
             downsampled_scale=0.1, border_width=0.25,
         ),
-        # Step up is the new skill: 1 -> 2 cm over the levels first (3 cm next).
+        # Step up is the new skill: 1 -> 3 cm over the levels.
         "step_up": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
-            proportion=0.5, step_height_range=(0.01, 0.02), step_width=0.6, platform_width=1.5, border_width=0.3
+            proportion=0.5, step_height_range=(0.01, 0.03), step_width=0.6, platform_width=1.5, border_width=0.3
         ),
         "step_down": terrain_gen.MeshPyramidStairsTerrainCfg(
             proportion=0.25, step_height_range=(0.01, 0.03), step_width=0.6, platform_width=1.5, border_width=0.3

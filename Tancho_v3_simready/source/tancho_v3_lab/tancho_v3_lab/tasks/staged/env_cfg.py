@@ -240,19 +240,28 @@ class TanchoV3WalkStepPlayEnvCfg(TanchoV3WalkStepEnvCfg):
 # -- stage 6: operator-triggered climbing ---------------------------------------
 @configclass
 class ClimbCommandsCfg(WalkCommandsCfg):
-    # Run 5: no random presses yet.  Press 0.1-0.3 s before the tire reaches the edge
-    # (a distance window fired ~1 s early at the policy's 0.12 m/s and the lift was wasted).
-    climb = ClimbTriggerCommandCfg(random_press_prob=0.0)
+    # Press 0.1-0.3 s before the tire reaches the edge (a distance window fired ~1 s
+    # early at a slow policy and the lift was wasted).  Some random presses keep the
+    # stage-A skill (lift anywhere without falling).
+    climb = ClimbTriggerCommandCfg(random_press_prob=0.3)
 
 
 @configclass
 class ClimbCurriculumCfg(TerrainCurriculumCfg):
-    reference_guidance = CurrTerm(func=reference_guidance)
+    # B1: the reference lift stays injected (fixed routine played by the Pi on a press).
+    reference_guidance = CurrTerm(func=reference_guidance, params={"hold_iters": 10**9})
+
+
+@configclass
+class ClimbFreeCurriculumCfg(TerrainCurriculumCfg):
+    # B2: full injection for 100 iterations, then linearly to 0 by 1100.
+    reference_guidance = CurrTerm(func=reference_guidance, params={"hold_iters": 100, "anneal_iters": 1000})
 
 
 @configclass
 class TanchoV3ClimbEnvCfg(TanchoV3WalkRoughEnvCfg):
-    """Started from a rough-walk checkpoint expanded by ``scripts/wheel_only/expand_climb_checkpoint.py``."""
+    """Climb B1: steps 1 -> 3 cm with the reference lift injected on every press.
+    Started from the stage-A (``TanchoV3-ClimbHop``) checkpoint."""
 
     scene: ClimbSceneCfg = ClimbSceneCfg(num_envs=4096, env_spacing=2.0)
     observations: ClimbObservationsCfg = ClimbObservationsCfg()
@@ -268,7 +277,8 @@ class TanchoV3ClimbEnvCfg(TanchoV3WalkRoughEnvCfg):
 
 @configclass
 class TanchoV3ClimbPlayEnvCfg(TanchoV3ClimbEnvCfg):
-    """3 cm steps up; an always-attentive operator presses 15 cm before each edge, no random presses."""
+    """3 cm steps up; an always-attentive operator presses 0.2 s before each edge, no random presses.
+    B1 deploys with the reference lift (Pi plays the fixed routine)."""
 
     def __post_init__(self):
         super().__post_init__()
@@ -279,6 +289,20 @@ class TanchoV3ClimbPlayEnvCfg(TanchoV3ClimbEnvCfg):
         self.commands.climb.auto_prob = 1.0
         self.commands.climb.random_press_prob = 0.0
         self.commands.climb.lookahead_range = (0.2, 0.2)
+        self.actions.leg_pos.guidance_scale = 1.0
+
+
+@configclass
+class TanchoV3ClimbFreeEnvCfg(TanchoV3ClimbEnvCfg):
+    """Climb B2: from B1, the reference lift is annealed to 0 so the weights alone produce it."""
+
+    curriculum: ClimbFreeCurriculumCfg = ClimbFreeCurriculumCfg()
+
+
+@configclass
+class TanchoV3ClimbFreePlayEnvCfg(TanchoV3ClimbPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
         # Deployment: no reference injection.
         self.actions.leg_pos.guidance_scale = 0.0
 

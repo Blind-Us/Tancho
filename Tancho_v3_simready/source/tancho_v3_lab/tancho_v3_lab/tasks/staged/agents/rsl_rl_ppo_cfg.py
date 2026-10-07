@@ -65,7 +65,8 @@ class TanchoV3WalkStepPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
 
 @configclass
 class TanchoV3ClimbPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
-    # Started from an expanded rough-walk checkpoint (expand_climb_checkpoint.py).
+    # B1, started from the stage-A (ClimbHop) checkpoint.
+    max_iterations = 1500
     experiment_name = "tancho_v3_climb"
 
 
@@ -73,3 +74,10 @@ class TanchoV3ClimbPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
 class TanchoV3ClimbHopPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
     max_iterations = 800
     experiment_name = "tancho_v3_climb_hop"
+
+
+@configclass
+class TanchoV3ClimbFreePPORunnerCfg(TanchoV3WalkPPORunnerCfg):
+    # B2, started from the B1 checkpoint.
+    max_iterations = 1500
+    experiment_name = "tancho_v3_climb_free"
