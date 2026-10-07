@@ -51,20 +51,29 @@ def reset_fallen(env, env_ids, roll_range: float = 0.15, drop_m: float = 0.03, a
     robot.write_root_pose_to_sim(state[:, :7], env_ids=ids)
 
 
-def recover_curriculum(env, env_ids, promote: float = 0.8, step: float = math.radians(10.0)) -> float:
-    """Raise the start tilt when most time-outs end upright (EMA over resets)."""
+def recover_curriculum(env, env_ids, promote: float = 0.8, step: float = math.radians(10.0), dwell_steps: int = 1200, rate_per_env: float = 0.002) -> float:
+    """Raise the start tilt when most time-outs end upright.
+
+    The upright share is an EMA weighted by the number of finished episodes (resets
+    are spread over all steps), and a level must last ``dwell_steps`` (50 PPO
+    iterations) before the next one - a per-reset EMA promoted 20 -> 90 deg within
+    60 iterations of run 1."""
     tilt = _max_tilt(env)
     ids = torch.as_tensor(env_ids, device=env.device, dtype=torch.long)
     if env.common_step_counter == 0 or len(ids) == 0:
         return tilt
+    if not hasattr(env, "_recover_level_step"):
+        env._recover_level_step = env.common_step_counter
     timed_out = env.termination_manager.time_outs[ids]
     if timed_out.any():
         g = env.scene["robot"].data.projected_gravity_b[ids[timed_out]]
-        up = (torch.acos((-g[:, 2]).clamp(-1.0, 1.0)) < FAILURE_TILT_RAD).float().mean().item()
-        env._recover_success = 0.95 * env._recover_success + 0.05 * up
-        if env._recover_success > promote and tilt < MAX_TILT_RAD:
+        up = torch.acos((-g[:, 2]).clamp(-1.0, 1.0)) < FAILURE_TILT_RAD
+        a = min(1.0, rate_per_env * len(up))
+        env._recover_success = (1.0 - a) * env._recover_success + a * up.float().mean().item()
+        settled = env.common_step_counter - env._recover_level_step >= dwell_steps
+        if settled and env._recover_success > promote and tilt < MAX_TILT_RAD:
             env._recover_max_tilt = min(MAX_TILT_RAD, tilt + step)
-            env._recover_success = 0.5
+            env._recover_level_step = env.common_step_counter
     return env._recover_max_tilt
 
 
