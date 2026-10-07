@@ -41,6 +41,31 @@ if TYPE_CHECKING:
 
 WHEEL_BODIES = ["wheel_L", "wheel_R"]  # command[:, 0] = LT = left, command[:, 1] = RT = right
 
+# -- reference lift (from scripts/wheel_only/leg_lift_feasibility.py) -----------------
+# Leg offsets from the nominal pose (dthigh, dcalf), started on the trigger's rising
+# edge: a short push (axle 21 mm away from the body), a tuck (axle 42 mm toward the
+# body), then a linear return.  Both poses keep the axle within 1 cm of its nominal
+# horizontal position.  The best scripted variant lifted the tire 26.6 mm on flat
+# ground but always fell (pitch reaction of the thigh swing) - the policy must add
+# the balance.
+REF_EXTEND = (0.275, -0.6)
+REF_TUCK = (-0.3, 0.6)
+REF_T_PUSH = 0.02
+REF_T_TUCK_END = 0.22
+REF_T_END = 0.40
+PHASE_CLIP_S = 0.6
+
+
+def reference_leg_offsets(phase: torch.Tensor) -> torch.Tensor:
+    """(N, 2) time since each side's press -> (N, 4) offsets thigh_L, calf_L, thigh_R, calf_R."""
+    ext = torch.tensor(REF_EXTEND, device=phase.device)
+    tuck = torch.tensor(REF_TUCK, device=phase.device)
+    p = phase.unsqueeze(-1)  # (N, 2, 1)
+    back = (1.0 - (p - REF_T_TUCK_END) / (REF_T_END - REF_T_TUCK_END)).clamp(0.0, 1.0)
+    off = torch.where(p < REF_T_PUSH, ext, torch.where(p < REF_T_TUCK_END, tuck, tuck * back))
+    off = torch.where(p < REF_T_END, off, torch.zeros_like(off))
+    return off.reshape(-1, 4)
+
 
 def _wheel_scan(env: ManagerBasedRLEnv, sensor_name: str, robot_name: str = "robot"):
     """Per wheel: local (yaw-frame) ray offsets from the wheel and ground heights.
@@ -85,6 +110,7 @@ class ClimbTriggerCommand(CommandTerm):
         self.hold_timer = torch.zeros(n, 2, device=dev)
         self.cooldown = torch.zeros(n, 2, device=dev)
         self.recent_timer = torch.zeros(n, device=dev)
+        self.phase = torch.full((n, 2), 10.0, device=dev)  # s since each side's rising edge
         self.lookahead = torch.full((n,), sum(cfg.lookahead_range) / 2, device=dev)
         self.attentive = torch.ones(n, dtype=torch.bool, device=dev)
         self.metrics["press_auto"] = torch.zeros(n, device=dev)
@@ -93,6 +119,11 @@ class ClimbTriggerCommand(CommandTerm):
     @property
     def command(self) -> torch.Tensor:
         return self.trigger
+
+    @property
+    def phase_obs(self) -> torch.Tensor:
+        """Time since each trigger's rising edge, 0 -> 1 over 0.6 s, 1 when idle (Pi: timer from the press)."""
+        return self.phase.clamp(max=PHASE_CLIP_S) / PHASE_CLIP_S
 
     @property
     def recently_pressed(self) -> torch.Tensor:
@@ -135,7 +166,10 @@ class ClimbTriggerCommand(CommandTerm):
         # -- random presses
         rnd = self.random_mode * (self.random_timer > 0.0).float().unsqueeze(1)
         self.random_timer = (self.random_timer - dt).clamp(min=0.0)
-        self.trigger = torch.maximum(auto, rnd)
+        new = torch.maximum(auto, rnd)
+        rising = (new > 0.0) & (self.trigger <= 0.0)
+        self.phase = torch.where(rising, torch.zeros_like(self.phase), self.phase + dt)
+        self.trigger = new
         pressed = self.trigger.max(dim=1).values > 0.0
         self.recent_timer = torch.where(pressed, torch.full_like(self.recent_timer, self.cfg.recent_s), (self.recent_timer - dt).clamp(min=0.0))
 
@@ -145,6 +179,7 @@ class ClimbTriggerCommand(CommandTerm):
         self.hold_timer[ids] = 0.0
         self.cooldown[ids] = 0.0
         self.recent_timer[ids] = 0.0
+        self.phase[ids] = 10.0
         return super().reset(env_ids)
 
 
@@ -166,7 +201,54 @@ class ClimbTriggerCommandCfg(CommandTermCfg):
     random_press_s: tuple[float, float] = (0.2, 0.5)
 
 
+# -- action: legs with optional reference guidance -------------------------------------
+class ClimbLegAction(mdp.JointPositionAction):
+    """Joint position action + ``scale`` * reference lift offsets (rad).
+
+    The scale is ``env._climb_ref_scale`` when the guidance curriculum sets it,
+    else ``cfg.guidance_scale``.  It anneals 1 -> 0 during training so the final
+    policy produces the lift itself; Play / deployment use 0 (no Pi-side table)."""
+
+    cfg: "ClimbLegActionCfg"
+
+    def process_actions(self, actions: torch.Tensor):
+        super().process_actions(actions)
+        scale = getattr(self._env, "_climb_ref_scale", self.cfg.guidance_scale)
+        if scale > 0.0:
+            term = self._env.command_manager.get_term(self.cfg.command_name)
+            self._processed_actions += scale * reference_leg_offsets(term.phase)
+
+
+@configclass
+class ClimbLegActionCfg(mdp.JointPositionActionCfg):
+    class_type: type = ClimbLegAction
+    command_name: str = "climb"
+    guidance_scale: float = 1.0
+
+
+def climb_phase(env: ManagerBasedRLEnv, command_name: str = "climb") -> torch.Tensor:
+    return env.command_manager.get_term(command_name).phase_obs
+
+
+def reference_guidance(env: ManagerBasedRLEnv, env_ids, hold_iters: int = 300, anneal_iters: int = 1200, steps_per_iter: int = 24) -> float:
+    """Curriculum: reference added to the leg action at full scale for ``hold_iters``, then linearly to 0."""
+    it = env.common_step_counter / steps_per_iter
+    env._climb_ref_scale = float(min(1.0, max(0.0, 1.0 - (it - hold_iters) / anneal_iters)))
+    return env._climb_ref_scale
+
+
 # -- rewards --------------------------------------------------------------------------
+def leg_reference_tracking(env: ManagerBasedRLEnv, command_name: str = "climb", std: float = 0.25) -> torch.Tensor:
+    """While a side's reference is running: exp(-|q - q_ref|^2 / std^2) over that leg's two joints."""
+    term = env.command_manager.get_term(command_name)
+    robot = env.scene["robot"]
+    if not hasattr(env, "_climb_leg_ids"):
+        env._climb_leg_ids = robot.find_joints(["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"], preserve_order=True)[0]
+    q = robot.data.joint_pos[:, env._climb_leg_ids] - robot.data.default_joint_pos[:, env._climb_leg_ids]
+    err = (q - reference_leg_offsets(term.phase)).square().reshape(-1, 2, 2).sum(-1)
+    active = (term.phase < REF_T_END).float()
+    return (active * torch.exp(-err / std**2)).sum(dim=1)
+
 def wheel_lift_on_trigger(env: ManagerBasedRLEnv, command_name: str = "climb", sensor_name: str = "height_scanner", max_clearance: float = 0.05) -> torch.Tensor:
     """Sum over pressed sides of tire clearance above the ground under it, normalized to [0, 1] at ``max_clearance``."""
     trig = env.command_manager.get_command(command_name)

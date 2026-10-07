@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Turn a walk/rough checkpoint into a ``TanchoV3-Climb-v0`` starting point.
 
-* Actor input 25 -> 27 (LT, RT trigger appended): new first-layer columns are
-  zero, so before training the policy ignores the triggers.
-* Critic input 29 -> 71 (trigger 2 + height scan 40 appended): zero columns.
+* Actor input 25 -> 29 (LT, RT trigger + time since each press appended): new
+  first-layer columns are zero, so before training the policy ignores them.
+* Critic input 29 -> 73 (trigger 2 + phase 2 + height scan 40 appended): zero columns.
 * Leg action scale 0.25 -> 0.6 rad: the leg rows of the output layer, the
   leg action std and the normalizer statistics of the leg ``last_action``
   inputs are multiplied by 0.25/0.6, so the same weights command the same
@@ -29,11 +29,10 @@ LEG_ACTION_DIMS = [0, 1, 2, 3]
 # wheel vel 2, last action 6 (legs 4 + wheels 2), leg pos 4, leg vel 4.
 LAST_ACTION_LEG_OBS = [11, 12, 13, 14]
 
-ACTOR_NEW = {"dims": 2, "mean": 0.0, "var": 0.05}
-CRITIC_NEW = [
-    {"dims": 2, "mean": 0.0, "var": 0.05},  # trigger
-    {"dims": 40, "mean": 0.0, "var": 1.0e-4},  # height scan (m), ~1 cm std
-]
+TRIGGER = {"dims": 2, "mean": 0.0, "var": 0.05}
+PHASE = {"dims": 2, "mean": 0.95, "var": 0.02}  # 1 when idle, 0 -> 1 over 0.6 s after a press
+ACTOR_NEW = [TRIGGER, PHASE]
+CRITIC_NEW = [TRIGGER, PHASE, {"dims": 40, "mean": 0.0, "var": 1.0e-4}]  # + height scan (m), ~1 cm std
 
 
 NORM_EPS = 1.0e-2  # rsl_rl EmpiricalNormalization: (x - mean) / (std + eps)
@@ -84,7 +83,7 @@ def main() -> None:
     std[4:] = torch.clamp(std[4:], min=args.wheel_std)
     print(f"new std {std.tolist()}")
 
-    _expand(actor, [ACTOR_NEW], LAST_ACTION_LEG_OBS, k, args.norm_count)
+    _expand(actor, ACTOR_NEW, LAST_ACTION_LEG_OBS, k, args.norm_count)
     # Critic layout: lin vel 3, ang vel 3, gravity 3, command 3, wheel vel 2,
     # last action 6 (legs at 14..17), base height 1, leg pos 4, leg vel 4.
     _expand(critic, CRITIC_NEW, [14, 15, 16, 17], k, args.norm_count)

@@ -86,17 +86,25 @@ class FullObservationsCfg:
 _HEIGHT_SCANNER = SceneEntityCfg("height_scanner")
 
 
+def _climb_phase(env):
+    from .climb import climb_phase
+
+    return climb_phase(env)
+
+
 @configclass
 class ClimbObservationsCfg:
     @configclass
     class PolicyCfg(FullObservationsCfg.PolicyCfg):
-        """27 dims: the 25 walk dims + LT, RT trigger (0/1) appended last."""
+        """29 dims: the 25 walk dims + LT, RT trigger (0/1) + time since each press (0 -> 1 over 0.6 s, 1 idle)."""
 
         climb_trigger = ObsTerm(func=mdp.generated_commands, params={"command_name": "climb"})
+        climb_phase = ObsTerm(func=_climb_phase)
 
     @configclass
     class CriticCfg(FullObservationsCfg.CriticCfg):
         climb_trigger = ObsTerm(func=mdp.generated_commands, params={"command_name": "climb"})
+        climb_phase = ObsTerm(func=_climb_phase)
         # Root height above each scan point minus the nominal 0.26 m (40 points).
         height_scan = ObsTerm(func=mdp.height_scan, params={"sensor_cfg": _HEIGHT_SCANNER, "offset": 0.26}, clip=(-0.5, 0.5))
 

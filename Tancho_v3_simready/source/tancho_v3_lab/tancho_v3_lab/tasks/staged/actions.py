@@ -50,7 +50,16 @@ class FullActionsCfg:
 
 @configclass
 class ClimbActionsCfg(FullActionsCfg):
-    """Same layout; legs reach nominal +/-0.6 rad so a wheel can be lifted onto a step."""
+    """Same layout; legs reach nominal +/-0.6 rad so a wheel can be lifted onto a
+    step, plus the annealed reference lift during training (``climb.ClimbLegAction``)."""
 
     def __post_init__(self):
-        self.leg_pos.scale = CLIMB_LEG_ACTION_SCALE_RAD
+        from .climb import ClimbLegActionCfg
+
+        self.leg_pos = ClimbLegActionCfg(
+            asset_name="robot",
+            joint_names=LEG_JOINTS,
+            scale=CLIMB_LEG_ACTION_SCALE_RAD,
+            use_default_offset=True,
+            preserve_order=True,
+        )

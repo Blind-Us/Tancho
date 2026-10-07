@@ -103,16 +103,22 @@ class FullWalkRewardsCfg(FullStandRewardsCfg):
 class ClimbRewardsCfg(FullWalkRewardsCfg):
     """Walk rewards + lift on trigger; posture terms pause while a trigger is (recently) pressed."""
 
-    # Pressed side tire clearance, 5 cm = full credit: a 0.4 s full lift earns 4.
-    wheel_lift = RewTerm(func=climb.wheel_lift_on_trigger, weight=10.0)
+    # Pressed side tire clearance, 5 cm = full credit: a 0.4 s full lift earns 0.8.
+    # (Weight 10 in runs 3-4.)
+    wheel_lift = RewTerm(func=climb.wheel_lift_on_trigger, weight=2.0)
     # Dense shaping toward the lift: axle pulled 5 cm toward the body = full credit.
     # (Run 1 clearance only, run 2 + retract at weight 2: both stayed ~1% of max with the
     # action std collapsing to 0.02 -- the signal was ~0.1% of the total reward.)
     # Run 3 at weight 10: the policy crouched on every press (retract up, clearance
     # flat), slowed to 0.16 m/s and parked short of the edge.  Back to a light hint.
-    wheel_retract = RewTerm(func=climb.wheel_retract_on_trigger, weight=2.0)
+    # Run 5: replaced by the reference tracking below (weight 0 keeps the log column).
+    wheel_retract = RewTerm(func=climb.wheel_retract_on_trigger, weight=0.0)
     # The actual goal: new height reached this episode.  One 3 cm step = 100 * 0.03 = 3.
     climb_progress = RewTerm(func=climb.climb_progress, weight=100.0)
+    # Run 5: imitate the reference lift while it runs (it is also injected into the
+    # leg action at an annealed scale, see climb.ClimbLegAction).  Full tracking of a
+    # 0.4 s lift on one leg earns 3 * 0.4 = 1.2.
+    leg_reference = RewTerm(func=climb.leg_reference_tracking, weight=3.0)
 
     def __post_init__(self):
         super().__post_init__()

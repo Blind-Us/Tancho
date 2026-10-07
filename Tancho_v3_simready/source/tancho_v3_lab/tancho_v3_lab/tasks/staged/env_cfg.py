@@ -27,7 +27,7 @@ from .observations import ClimbObservationsCfg, FullObservationsCfg, WheelOnlyOb
 from .rewards import ClimbRewardsCfg, FullStandRewardsCfg, FullWalkRewardsCfg, WheelOnlyRewardsCfg
 from .scene import DECIMATION, EPISODE_LENGTH_S, NOMINAL_FRICTION, SIM_DT_S, ClimbSceneCfg, FullSceneCfg, WheelOnlySceneCfg
 from .terminations import FullTerminationsCfg, WheelOnlyTerminationsCfg
-from .climb import ClimbTriggerCommandCfg
+from .climb import ClimbTriggerCommandCfg, reference_guidance
 from .terrain import CLIMB_GENERATOR, ROUGH_GENERATOR, STEP_GENERATOR, make_terrain, play_generator, terrain_levels_tracking
 
 
@@ -240,7 +240,14 @@ class TanchoV3WalkStepPlayEnvCfg(TanchoV3WalkStepEnvCfg):
 # -- stage 6: operator-triggered climbing ---------------------------------------
 @configclass
 class ClimbCommandsCfg(WalkCommandsCfg):
-    climb = ClimbTriggerCommandCfg()
+    # Run 5: no random presses yet and presses within 4-16 cm of the tire front
+    # (the only scripted success fired 10 cm out).
+    climb = ClimbTriggerCommandCfg(random_press_prob=0.0, lookahead_range=(0.08, 0.20))
+
+
+@configclass
+class ClimbCurriculumCfg(TerrainCurriculumCfg):
+    reference_guidance = CurrTerm(func=reference_guidance)
 
 
 @configclass
@@ -252,6 +259,7 @@ class TanchoV3ClimbEnvCfg(TanchoV3WalkRoughEnvCfg):
     actions: ClimbActionsCfg = ClimbActionsCfg()
     rewards: ClimbRewardsCfg = ClimbRewardsCfg()
     commands: ClimbCommandsCfg = ClimbCommandsCfg()
+    curriculum: ClimbCurriculumCfg = ClimbCurriculumCfg()
 
     def __post_init__(self):
         super().__post_init__()
@@ -271,3 +279,5 @@ class TanchoV3ClimbPlayEnvCfg(TanchoV3ClimbEnvCfg):
         self.commands.climb.auto_prob = 1.0
         self.commands.climb.random_press_prob = 0.0
         self.commands.climb.lookahead_range = (0.15, 0.15)
+        # Deployment: no reference injection.
+        self.actions.leg_pos.guidance_scale = 0.0
