@@ -8,6 +8,17 @@ Click the Isaac Sim viewport first so it has keyboard focus, then:
   1 / 2 / 3  speed level: slow / medium / fast
   R          reset the robot
 
+Climb policies (``TanchoV3-ClimbHop-Play-v0`` / ``TanchoV3-Climb-Play-v0``), the
+Xbox triggers on the keyboard (hold):
+
+  Q          LT: lift the left leg
+  E          RT: lift the right leg
+  SPACE      LT+RT: short hop
+
+``--terrain flat|rough|step_up|step_down`` picks one 16 m tile (rough = 2 cm
+bumps, steps = 3 cm); ``--guidance`` is the reference-lift injection (the stage-A
+policy only lifts with 1).
+
 Speed levels are inside the training ranges (vx +/-0.6 m/s, yaw rate +/-1.0 rad/s).
 Releasing every key commands zero, i.e. stand still.
 """
@@ -24,6 +35,8 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser()
 parser.add_argument("--task", default="TanchoV3-Walk-Flat-Play-v0")
 parser.add_argument("--checkpoint", type=Path, required=True, help="exported TorchScript policy.pt")
+parser.add_argument("--terrain", choices=("flat", "rough", "step_up", "step_down"), default=None, help="Climb tasks: terrain tile")
+parser.add_argument("--guidance", type=float, default=1.0, help="Climb tasks: reference-lift injection scale")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 simulation_app = AppLauncher(args).app
@@ -39,6 +52,7 @@ import tancho_v3_lab.tasks  # noqa: E402,F401
 # (vx m/s, yaw rate rad/s) per speed level
 SPEED_LEVELS = {"KEY_1": (0.2, 0.5), "KEY_2": (0.4, 0.8), "KEY_3": (0.6, 1.0)}
 MOVE_KEYS = {"W": (1, 0), "S": (-1, 0), "A": (0, 1), "D": (0, -1)}
+TRIGGER_KEYS = {"Q": (1.0, 0.0), "E": (0.0, 1.0), "SPACE": (1.0, 1.0)}
 
 
 class WasdKeyboard:
@@ -56,7 +70,7 @@ class WasdKeyboard:
             return True
         name = event.input if isinstance(event.input, str) else event.input.name
         if event.type == carb.input.KeyboardEventType.KEY_PRESS:
-            if name in MOVE_KEYS:
+            if name in MOVE_KEYS or name in TRIGGER_KEYS:
                 self.held.add(name)
                 print(f"[teleop] {name} down", flush=True)
             elif name in SPEED_LEVELS:
@@ -73,6 +87,11 @@ class WasdKeyboard:
         turn = sum(MOVE_KEYS[k][1] for k in self.held)
         return fwd * self.vx_max, turn * self.wz_max
 
+    def triggers(self) -> tuple[float, float]:
+        lt = max((TRIGGER_KEYS[k][0] for k in self.held if k in TRIGGER_KEYS), default=0.0)
+        rt = max((TRIGGER_KEYS[k][1] for k in self.held if k in TRIGGER_KEYS), default=0.0)
+        return lt, rt
+
 
 def main() -> None:
     cfg = parse_env_cfg(args.task, device=args.device, num_envs=1, use_fabric=True)
@@ -81,9 +100,23 @@ def main() -> None:
     cfg.commands.base_velocity.rel_standing_envs = 0.0
     ranges = cfg.commands.base_velocity.ranges
     ranges.lin_vel_x = ranges.lin_vel_y = ranges.ang_vel_z = (0.0, 0.0)
+    is_climb = hasattr(cfg.commands, "climb")
+    if is_climb:
+        from tancho_v3_lab.tasks.staged.terrain import CLIMB_GENERATOR, make_terrain, play_generator
+
+        # Only the keyboard presses the triggers.
+        cfg.commands.climb.auto_prob = 0.0
+        cfg.commands.climb.random_press_prob = 0.0
+        cfg.actions.leg_pos.guidance_scale = args.guidance
+        if args.terrain:
+            cfg.scene.terrain = make_terrain(
+                play_generator(CLIMB_GENERATOR, args.terrain, 0.0 if args.terrain == "flat" else 1.0, size=16.0),
+                max_init_level=None,
+            )
     env = gym.make(args.task, cfg=cfg)
     core = env.unwrapped
     command = core.command_manager.get_term("base_velocity")
+    climb = core.command_manager.get_term("climb") if is_climb else None
     policy = torch.jit.load(str(args.checkpoint.resolve()), map_location=core.device).eval()
     keys = WasdKeyboard()
     print(__doc__, flush=True)
@@ -95,8 +128,16 @@ def main() -> None:
             keys.reset_requested = False
             obs, _ = env.reset()
         vx, wz = keys.command()
-        command.vel_command_b[0] = torch.tensor([vx, 0.0, wz], device=core.device)
         with torch.inference_mode():
+            command.vel_command_b[0] = torch.tensor([vx, 0.0, wz], device=core.device)
+            if climb is not None:
+                # Hold through the term's own press slot so the trigger edge and phase follow
+                # the training code path; the timer is refreshed every step while held.
+                # (Inside inference mode: the term's buffers become inference tensors.)
+                lt, rt = keys.triggers()
+                if lt or rt:
+                    climb.random_mode[0] = torch.tensor([lt, rt], device=core.device)
+                    climb.random_timer[0] = 1.5 * core.step_dt
             obs, _, term, _, _ = env.step(policy(obs["policy"]))
         if bool(term[0]):
             print("[teleop] fell over (tilt > 15 deg or body contact); reset", flush=True)
