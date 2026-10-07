@@ -7,6 +7,12 @@
 | 1 | `TanchoV3-WheelOnly-Flat-v0` | 腿固定（剛體合併），只動兩輪 | 0 | 自穩站立 |
 | 2 | `TanchoV3-Stand-Flat-v0` | 6-DOF | 0 | 自穩站立，Play 行為正常 |
 | 3 | `TanchoV3-Walk-Flat-v0` | 6-DOF，從階段 2 權重開始 | vx、yaw rate | 依命令行走 |
+| 4 | `TanchoV3-Walk-Rough-v0` | 6-DOF，從階段 3 權重開始（`--keep_obs_norm`） | vx、yaw rate | 凹凸 0→2 cm、坡 0→8°（`terrain.py`） |
+| 5 | `TanchoV3-Walk-Step-v0` | 6-DOF，從階段 4 權重開始（`--keep_obs_norm`） | vx、yaw rate | 金字塔台階上/下 0.5→3 cm |
+
+階段 4/5 用 `terrain.py` 的課程：撐到 time-out 且速度追蹤 > 60% 升級，跌倒降級。
+驗收：`evaluate_walk.py --task TanchoV3-Walk-Rough-Play-v0`、`evaluate_step.py --direction up|down`。
+2026-10-07 結果：rough 通過；上台階受輪徑/摩擦限制只到約 5 mm（準靜態上限 r(1−cos33°) ≈ 5.7 mm），下 3 cm 沒問題。
 
 每個任務都有 `-Play-v0` 版本：標稱物理、無雜訊、無隨機化、無推力、正立靜止 reset、單一機器人。Walk 的 Play 會顯示命令箭頭。
 
