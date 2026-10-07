@@ -5,6 +5,8 @@
 | 1     | TanchoV3-WheelOnly-Flat-v0     | 2 wheels, legs merged | zero   |
 | 2     | TanchoV3-Stand-Flat-v0         | 6-DOF   | zero             |
 | 3     | TanchoV3-Walk-Flat-v0          | 6-DOF   | vx / yaw rate    |
+| 4     | TanchoV3-Walk-Rough-v0         | 6-DOF   | vx / yaw rate, bumps + slopes |
+| 5     | TanchoV3-Walk-Step-v0          | 6-DOF   | vx / yaw rate, 0 -> 3 cm steps |
 
 Each has a ``-Play-v0`` variant: nominal physics, no noise, no randomization,
 upright reset, one robot.
@@ -14,6 +16,7 @@ from __future__ import annotations
 
 import isaaclab.envs.mdp as mdp
 from isaaclab.envs import ManagerBasedRLEnvCfg, ViewerCfg
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
@@ -23,6 +26,7 @@ from .observations import FullObservationsCfg, WheelOnlyObservationsCfg
 from .rewards import FullStandRewardsCfg, FullWalkRewardsCfg, WheelOnlyRewardsCfg
 from .scene import DECIMATION, EPISODE_LENGTH_S, NOMINAL_FRICTION, SIM_DT_S, FullSceneCfg, WheelOnlySceneCfg
 from .terminations import FullTerminationsCfg, WheelOnlyTerminationsCfg
+from .terrain import ROUGH_GENERATOR, STEP_GENERATOR, make_terrain, play_generator, terrain_levels_tracking
 
 
 # -- commands -------------------------------------------------------------------
@@ -181,3 +185,51 @@ class TanchoV3WalkFlatPlayEnvCfg(TanchoV3WalkFlatEnvCfg):
         super().__post_init__()
         _to_play(self)
         self.commands.base_velocity.debug_vis = True
+
+
+# -- stages 4/5: 6-DOF walk on uneven ground ---------------------------------------
+# Same observation / action as the flat walk (blind: no height scan), started
+# from a flat-walk checkpoint with ``--init_checkpoint``.
+@configclass
+class TerrainCurriculumCfg:
+    terrain_levels = CurrTerm(func=terrain_levels_tracking)
+
+
+@configclass
+class TanchoV3WalkRoughEnvCfg(TanchoV3WalkFlatEnvCfg):
+    curriculum: TerrainCurriculumCfg = TerrainCurriculumCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain = make_terrain(ROUGH_GENERATOR)
+
+
+@configclass
+class TanchoV3WalkRoughPlayEnvCfg(TanchoV3WalkRoughEnvCfg):
+    """A single 16 m tile of the hardest bumps (2 cm peak-to-peak)."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        _to_play(self)
+        self.commands.base_velocity.debug_vis = True
+        self.curriculum = None
+        self.scene.terrain = make_terrain(play_generator(ROUGH_GENERATOR, "rough", 1.0), max_init_level=None)
+
+
+@configclass
+class TanchoV3WalkStepEnvCfg(TanchoV3WalkRoughEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain = make_terrain(STEP_GENERATOR)
+
+
+@configclass
+class TanchoV3WalkStepPlayEnvCfg(TanchoV3WalkStepEnvCfg):
+    """A single tile of 3 cm steps up (inverted pyramid: spawn in the pit)."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        _to_play(self)
+        self.commands.base_velocity.debug_vis = True
+        self.curriculum = None
+        self.scene.terrain = make_terrain(play_generator(STEP_GENERATOR, "step_up", 1.0, size=8.0), max_init_level=None)

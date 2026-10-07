@@ -13,6 +13,8 @@ _STAGES = {
     "TanchoV3-WheelOnly-Flat": ("TanchoV3WheelOnlyFlat", "TanchoV3WheelOnlyPPORunnerCfg"),
     "TanchoV3-Stand-Flat": ("TanchoV3StandFlat", "TanchoV3StandPPORunnerCfg"),
     "TanchoV3-Walk-Flat": ("TanchoV3WalkFlat", "TanchoV3WalkPPORunnerCfg"),
+    "TanchoV3-Walk-Rough": ("TanchoV3WalkRough", "TanchoV3WalkRoughPPORunnerCfg"),
+    "TanchoV3-Walk-Step": ("TanchoV3WalkStep", "TanchoV3WalkStepPPORunnerCfg"),
 }
 
 for _task, (_cfg, _runner) in _STAGES.items():

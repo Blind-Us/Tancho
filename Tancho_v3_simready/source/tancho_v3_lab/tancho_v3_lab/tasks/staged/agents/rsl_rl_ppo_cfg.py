@@ -49,3 +49,15 @@ class TanchoV3WalkPPORunnerCfg(TanchoV3WheelOnlyPPORunnerCfg):
     # Started from a stage-2 checkpoint with ``train.py --init_checkpoint``.
     max_iterations = 3000
     experiment_name = "tancho_v3_walk"
+
+
+@configclass
+class TanchoV3WalkRoughPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
+    # Started from a flat-walk checkpoint with ``--init_checkpoint``.
+    experiment_name = "tancho_v3_walk_rough"
+
+
+@configclass
+class TanchoV3WalkStepPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
+    # Started from a rough-walk checkpoint with ``--init_checkpoint``.
+    experiment_name = "tancho_v3_walk_step"
