@@ -50,6 +50,11 @@ parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point")
 parser.add_argument("--seed", type=int, default=None)
 parser.add_argument("--max_iterations", type=int, default=None)
 parser.add_argument("--init_checkpoint", type=str, default=None, help="Model weights to start from; iteration count restarts at 0.")
+parser.add_argument(
+    "--keep_obs_norm",
+    action="store_true",
+    help="With --init_checkpoint: keep the checkpoint's observation statistics (same observation distribution, e.g. walk -> rough).",
+)
 parser.add_argument("--allow-dirty", action="store_true", help="Train even if task files are uncommitted.")
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
@@ -120,11 +125,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
         # average would need ~1e9 walk samples to catch up: a 0.3 m/s command
         # was normalized to ~4 instead of ~0.9 and the policy overshot to 1 m/s.
         # With count 0 the first batch replaces mean/var, then they keep updating.
-        for model in (runner.alg.actor, runner.alg.critic):
-            if hasattr(model.obs_normalizer, "count"):
-                model.obs_normalizer.count.zero_()
+        # Between tasks with the same observation distribution (walk -> rough)
+        # the reset is harmful: the first batch is near-identical reset states,
+        # the tiny variance blows the inputs up, and a policy that walked falls
+        # within 0.2 s and needs hundreds of iterations to recover.
+        if not args_cli.keep_obs_norm:
+            for model in (runner.alg.actor, runner.alg.critic):
+                if hasattr(model.obs_normalizer, "count"):
+                    model.obs_normalizer.count.zero_()
         with open(os.path.join(log_dir, "git_commit.txt"), "a") as stream:
             stream.write(f"init_checkpoint {os.path.abspath(args_cli.init_checkpoint)}\n")
+            stream.write(f"keep_obs_norm {args_cli.keep_obs_norm}\n")
         print(f"[INFO] Initialized from {args_cli.init_checkpoint}")
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
