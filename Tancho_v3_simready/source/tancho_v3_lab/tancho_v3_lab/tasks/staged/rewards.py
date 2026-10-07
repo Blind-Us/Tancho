@@ -103,11 +103,12 @@ class FullWalkRewardsCfg(FullStandRewardsCfg):
 class ClimbRewardsCfg(FullWalkRewardsCfg):
     """Walk rewards + lift on trigger; posture terms pause while a trigger is (recently) pressed."""
 
-    # Pressed side's tire clearance, 5 cm = full credit: a 0.4 s full lift earns 0.8.
-    wheel_lift = RewTerm(func=climb.wheel_lift_on_trigger, weight=2.0)
+    # Pressed side tire clearance, 5 cm = full credit: a 0.4 s full lift earns 4.
+    wheel_lift = RewTerm(func=climb.wheel_lift_on_trigger, weight=10.0)
     # Dense shaping toward the lift: axle pulled 5 cm toward the body = full credit.
-    # (Run 1 with clearance only: wheel_lift stayed ~0 and the action std collapsed to 0.02.)
-    wheel_retract = RewTerm(func=climb.wheel_retract_on_trigger, weight=2.0)
+    # (Run 1 clearance only, run 2 + retract at weight 2: both stayed ~1% of max with the
+    # action std collapsing to 0.02 -- the signal was ~0.1% of the total reward.)
+    wheel_retract = RewTerm(func=climb.wheel_retract_on_trigger, weight=10.0)
 
     def __post_init__(self):
         super().__post_init__()
