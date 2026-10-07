@@ -194,6 +194,27 @@ def wheel_retract_on_trigger(env: ManagerBasedRLEnv, command_name: str = "climb"
     return (trig * retract).sum(dim=1)
 
 
+def climb_progress(env: ManagerBasedRLEnv, sensor_name: str = "height_scanner") -> torch.Tensor:
+    """Pays for new height: increments of the episode's running maximum of the ground
+    height under the wheels (mean of both) above the spawn ground.  Returned as a rate
+    (m/s), so the episode sum is weight * best height gained.  Going down, or driving
+    back and forth over bumps, earns nothing beyond the first time a height is reached."""
+    dx, dy, hit_z, _ = _wheel_scan(env, sensor_name)
+    ground = _ground_under(dx, dy, hit_z).mean(dim=1)
+    if not hasattr(env, "_climb_ref"):
+        env._climb_ref = ground.clone()
+        env._climb_best = torch.zeros_like(ground)
+        env._climb_init = torch.zeros_like(ground, dtype=torch.bool)
+    fresh = (env.episode_length_buf <= 1) | ~env._climb_init
+    env._climb_ref = torch.where(fresh, ground, env._climb_ref)
+    env._climb_best = torch.where(fresh, torch.zeros_like(ground), env._climb_best)
+    env._climb_init |= True
+    h = ground - env._climb_ref
+    gain = (h - env._climb_best).clamp(min=0.0)
+    env._climb_best = torch.maximum(env._climb_best, h)
+    return gain / env.step_dt
+
+
 def _free(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return 1.0 - env.command_manager.get_term(command_name).recently_pressed
 

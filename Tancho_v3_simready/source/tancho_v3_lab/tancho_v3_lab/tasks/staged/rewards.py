@@ -108,7 +108,11 @@ class ClimbRewardsCfg(FullWalkRewardsCfg):
     # Dense shaping toward the lift: axle pulled 5 cm toward the body = full credit.
     # (Run 1 clearance only, run 2 + retract at weight 2: both stayed ~1% of max with the
     # action std collapsing to 0.02 -- the signal was ~0.1% of the total reward.)
-    wheel_retract = RewTerm(func=climb.wheel_retract_on_trigger, weight=10.0)
+    # Run 3 at weight 10: the policy crouched on every press (retract up, clearance
+    # flat), slowed to 0.16 m/s and parked short of the edge.  Back to a light hint.
+    wheel_retract = RewTerm(func=climb.wheel_retract_on_trigger, weight=2.0)
+    # The actual goal: new height reached this episode.  One 3 cm step = 100 * 0.03 = 3.
+    climb_progress = RewTerm(func=climb.climb_progress, weight=100.0)
 
     def __post_init__(self):
         super().__post_init__()
