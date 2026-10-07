@@ -245,6 +245,14 @@ class ClimbCommandsCfg(WalkCommandsCfg):
     # stage-A skill (lift anywhere without falling).
     climb = ClimbTriggerCommandCfg(random_press_prob=0.3)
 
+    def __post_init__(self):
+        # Mostly forward and fast: the tire must travel gap + radius (~4-6 cm) in the
+        # ~0.1 s it is up, i.e. >= 0.4-0.6 m/s at the edge.  With the walk command
+        # range B1 approached at 0.2 m/s and every lift landed short of the edge.
+        self.base_velocity.ranges.lin_vel_x = (0.3, 0.6)
+        self.base_velocity.ranges.ang_vel_z = (-0.3, 0.3)
+        self.base_velocity.rel_standing_envs = 0.05
+
 
 @configclass
 class ClimbCurriculumCfg(TerrainCurriculumCfg):
