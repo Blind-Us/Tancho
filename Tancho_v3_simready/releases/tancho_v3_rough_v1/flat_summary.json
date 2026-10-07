@@ -1,0 +1,94 @@
+{
+  "checkpoint": "/home/azul/Tancho/Tancho_v3_simready/logs/rsl_rl/tancho_v3_walk_rough/2026-10-07_09-22-15_a1bf9fc/exported/policy.pt",
+  "task": "TanchoV3-Walk-Flat-Play-v0",
+  "terminated_at_s": null,
+  "segments": {
+    "stand": {
+      "cmd_vx": 0.0,
+      "cmd_wz": 0.0,
+      "mean_vx": -0.011799811062713465,
+      "mean_wz": -0.0004680254659372925,
+      "mean_abs_vx_err": 0.011799811062713465,
+      "mean_abs_wz_err": 0.00454636122136435,
+      "max_abs_pitch_deg": 0.5260731885160048,
+      "pass": true
+    },
+    "fwd_0.3": {
+      "cmd_vx": 0.3,
+      "cmd_wz": 0.0,
+      "mean_vx": 0.26777226499148776,
+      "mean_wz": -0.004767580460757017,
+      "mean_abs_vx_err": 0.03222773500851212,
+      "mean_abs_wz_err": 0.004767580460757017,
+      "max_abs_pitch_deg": 4.650315866483933,
+      "pass": true
+    },
+    "fwd_0.6": {
+      "cmd_vx": 0.6,
+      "cmd_wz": 0.0,
+      "mean_vx": 0.5567854860850743,
+      "mean_wz": -0.016272508427500724,
+      "mean_abs_vx_err": 0.043214513914925576,
+      "mean_abs_wz_err": 0.016272508427500724,
+      "max_abs_pitch_deg": 4.302131441725107,
+      "pass": true
+    },
+    "back_0.3": {
+      "cmd_vx": -0.3,
+      "cmd_wz": 0.0,
+      "mean_vx": -0.30012706313814436,
+      "mean_wz": -0.005585823225389634,
+      "mean_abs_vx_err": 0.0005480367115565797,
+      "mean_abs_wz_err": 0.005585823225389634,
+      "max_abs_pitch_deg": 9.71244814549183,
+      "pass": true
+    },
+    "yaw_+1.0": {
+      "cmd_vx": 0.0,
+      "cmd_wz": 1.0,
+      "mean_vx": 0.0211377420595714,
+      "mean_wz": 1.0339346143177577,
+      "mean_abs_vx_err": 0.0211377420595714,
+      "mean_abs_wz_err": 0.033934614317757746,
+      "max_abs_pitch_deg": 4.958347612577023,
+      "pass": true
+    },
+    "yaw_-0.5": {
+      "cmd_vx": 0.0,
+      "cmd_wz": -0.5,
+      "mean_vx": -0.0012019710202834436,
+      "mean_wz": -0.5041565253053393,
+      "mean_abs_vx_err": 0.0012019710202834436,
+      "mean_abs_wz_err": 0.006042900255748204,
+      "max_abs_pitch_deg": 0.979634217458152,
+      "pass": true
+    },
+    "arc_0.4_+0.5": {
+      "cmd_vx": 0.4,
+      "cmd_wz": 0.5,
+      "mean_vx": 0.37282576526914324,
+      "mean_wz": 0.5097652053833008,
+      "mean_abs_vx_err": 0.027174234730856766,
+      "mean_abs_wz_err": 0.00976520538330078,
+      "max_abs_pitch_deg": 5.549960132568006,
+      "pass": true
+    },
+    "stop": {
+      "cmd_vx": 0.0,
+      "cmd_wz": 0.0,
+      "mean_vx": -0.011795103386044501,
+      "mean_wz": -0.000512979656807147,
+      "mean_abs_vx_err": 0.011795103386044501,
+      "mean_abs_wz_err": 0.006433459826163016,
+      "max_abs_pitch_deg": 5.3714960892206545,
+      "pass": true
+    }
+  },
+  "end_speed_m_s": 0.011786775260604052,
+  "end_mirror_rad": 0.011677980422973633,
+  "pass_no_failure": true,
+  "pass_tracking": true,
+  "pass_stop": true,
+  "pass_leg_pose": true,
+  "pass_all": true
+}

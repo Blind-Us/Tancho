@@ -10,9 +10,14 @@
 | 4 | `TanchoV3-Walk-Rough-v0` | 6-DOF，從階段 3 權重開始（`--keep_obs_norm`） | vx、yaw rate | 凹凸 0→2 cm、坡 0→8°（`terrain.py`） |
 | 5 | `TanchoV3-Walk-Step-v0` | 6-DOF，從階段 4 權重開始（`--keep_obs_norm`） | vx、yaw rate | 金字塔台階上/下 0.5→3 cm |
 
+| 6A | `TanchoV3-ClimbHop-v0` | 6-DOF，腿 ±0.6 rad，觀測 29 維（+ LT/RT、按下後時間） | vx、yaw rate + Trigger | 平地按鍵抬腳/短跳不倒（參考動作疊加） |
+| 6B | `TanchoV3-Climb-v0` / `TanchoV3-ClimbFree-v0` | 同上 | 同上 | 按鍵上台階（固定連招 / 全權重）——**未完成** |
+
 階段 4/5 用 `terrain.py` 的課程：撐到 time-out 且速度追蹤 > 60% 升級，跌倒降級。
 驗收：`evaluate_walk.py --task TanchoV3-Walk-Rough-Play-v0`、`evaluate_step.py --direction up|down`。
-2026-10-07 結果：rough 通過；上台階受輪徑/摩擦限制只到約 5 mm（準靜態上限 r(1−cos33°) ≈ 5.7 mm），下 3 cm 沒問題。
+階段 6（`climb.py`）：Xbox LT 抬左腳、RT 抬右腳、LT+RT 短跳。6A 在參考動作疊加下單腳 37–43 mm、短跳 33 mm 不倒；6B 上台階在 2026-10-07 未成功（policy 一律學成「開慢、躲邊緣」），細節見 `logs/rsl_rl/PROGRESS.md`。
+
+2026-10-07 結果：rough 通過（release `releases/tancho_v3_rough_v1`）；上台階受輪徑/摩擦限制只到約 5 mm（準靜態上限 r(1−cos33°) ≈ 5.7 mm），下 3 cm 沒問題。
 
 每個任務都有 `-Play-v0` 版本：標稱物理、無雜訊、無隨機化、無推力、正立靜止 reset、單一機器人。Walk 的 Play 會顯示命令箭頭。
 

@@ -1,0 +1,12 @@
+{
+  "checkpoint": "/home/azul/Tancho/Tancho_v3_simready/logs/rsl_rl/tancho_v3_walk_rough/2026-10-07_09-22-15_a1bf9fc/exported/policy.pt",
+  "vx": 0.4,
+  "step_height_m": 0.01,
+  "direction": "down",
+  "terminated_at_s": null,
+  "axle_height_change_m": 0.06094276160001755,
+  "steps_crossed": 6,
+  "distance_m": 4.278096675872803,
+  "max_abs_pitch_deg": 5.51642069824781,
+  "pass": true
+}
