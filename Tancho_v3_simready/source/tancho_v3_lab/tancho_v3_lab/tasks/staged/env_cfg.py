@@ -28,7 +28,7 @@ from .rewards import ClimbRewardsCfg, FullStandRewardsCfg, FullWalkRewardsCfg, W
 from .scene import DECIMATION, EPISODE_LENGTH_S, NOMINAL_FRICTION, SIM_DT_S, ClimbSceneCfg, FullSceneCfg, WheelOnlySceneCfg
 from .terminations import FullTerminationsCfg, WheelOnlyTerminationsCfg
 from .climb import ClimbTriggerCommandCfg, reference_guidance
-from .terrain import CLIMB_GENERATOR, ROUGH_GENERATOR, STEP_GENERATOR, make_terrain, play_generator, terrain_levels_tracking
+from .terrain import CLIMB_GENERATOR, HOP_GENERATOR, ROUGH_GENERATOR, STEP_GENERATOR, make_terrain, play_generator, terrain_levels_tracking
 
 
 # -- commands -------------------------------------------------------------------
@@ -280,4 +280,40 @@ class TanchoV3ClimbPlayEnvCfg(TanchoV3ClimbEnvCfg):
         self.commands.climb.random_press_prob = 0.0
         self.commands.climb.lookahead_range = (0.2, 0.2)
         # Deployment: no reference injection.
+        self.actions.leg_pos.guidance_scale = 0.0
+
+
+# -- stage 6A: lift / hop on command without falling (no steps to avoid) ------------
+@configclass
+class HopCommandsCfg(WalkCommandsCfg):
+    # A random press (L, R or both, 0.2-0.5 s) about every 3 s; no auto presses.
+    climb = ClimbTriggerCommandCfg(random_press_prob=0.8, auto_prob=0.0)
+
+
+@configclass
+class HopCurriculumCfg(TerrainCurriculumCfg):
+    # Reference lift injected at full scale throughout stage A.
+    reference_guidance = CurrTerm(func=reference_guidance, params={"hold_iters": 10**9})
+
+
+@configclass
+class TanchoV3ClimbHopEnvCfg(TanchoV3ClimbEnvCfg):
+    """Climb step A.  Run 5 on steps learned to drive at 0.13 m/s and stop short of
+    every edge before it could balance a lift (the scripted lift fell 39/40 times)."""
+
+    commands: HopCommandsCfg = HopCommandsCfg()
+    curriculum: HopCurriculumCfg = HopCurriculumCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain = make_terrain(HOP_GENERATOR)
+
+
+@configclass
+class TanchoV3ClimbHopPlayEnvCfg(TanchoV3ClimbHopEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        _to_play(self)
+        self.curriculum = None
+        self.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, "flat", 0.0, size=16.0), max_init_level=None)
         self.actions.leg_pos.guidance_scale = 0.0
