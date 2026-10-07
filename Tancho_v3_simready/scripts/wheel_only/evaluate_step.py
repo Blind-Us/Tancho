@@ -22,6 +22,8 @@ import argparse
 import csv
 import json
 import math
+import os
+import sys
 from pathlib import Path
 
 from isaaclab.app import AppLauncher
@@ -121,6 +123,14 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    code = main()
-    simulation_app.close()
-    raise SystemExit(code)
+    code = 1
+    try:
+        code = main()
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+    # SimulationApp.close() can hang; exit hard (same as evaluate_walk.py).
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
