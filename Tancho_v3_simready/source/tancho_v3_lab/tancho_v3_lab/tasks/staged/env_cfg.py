@@ -240,9 +240,9 @@ class TanchoV3WalkStepPlayEnvCfg(TanchoV3WalkStepEnvCfg):
 # -- stage 6: operator-triggered climbing ---------------------------------------
 @configclass
 class ClimbCommandsCfg(WalkCommandsCfg):
-    # Run 5: no random presses yet and presses within 4-16 cm of the tire front
-    # (the only scripted success fired 10 cm out).
-    climb = ClimbTriggerCommandCfg(random_press_prob=0.0, lookahead_range=(0.08, 0.20))
+    # Run 5: no random presses yet.  Press 0.1-0.3 s before the tire reaches the edge
+    # (a distance window fired ~1 s early at the policy's 0.12 m/s and the lift was wasted).
+    climb = ClimbTriggerCommandCfg(random_press_prob=0.0)
 
 
 @configclass
@@ -278,6 +278,6 @@ class TanchoV3ClimbPlayEnvCfg(TanchoV3ClimbEnvCfg):
         self.scene.terrain = make_terrain(play_generator(CLIMB_GENERATOR, "step_up", 1.0, size=8.0), max_init_level=None)
         self.commands.climb.auto_prob = 1.0
         self.commands.climb.random_press_prob = 0.0
-        self.commands.climb.lookahead_range = (0.15, 0.15)
+        self.commands.climb.lookahead_range = (0.2, 0.2)
         # Deployment: no reference injection.
         self.actions.leg_pos.guidance_scale = 0.0

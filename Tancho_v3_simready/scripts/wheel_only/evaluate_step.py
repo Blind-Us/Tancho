@@ -97,12 +97,18 @@ def run(direction: str) -> tuple[dict, list[dict]]:
             break
 
     dz = [0.5 * (r["axle_dz_L_m"] + r["axle_dz_R_m"]) for r in rows]
-    extreme = max(dz) if direction == "up" else -min(dz)
+    # Count from where the robot ends (median of the last 0.5 s), not the peak: a hop
+    # or a contact glitch can spike the axle height for a sample without a step gained.
+    # After a termination the env has auto-reset, so the last sample is dropped.
+    tail = sorted(dz[-26:-1] if terminated_at is not None else dz[-25:])
+    final = tail[len(tail) // 2]
+    extreme = final if direction == "up" else -final
     steps = int(math.floor(extreme / args.step_height + 0.5))
     summary = {
         "direction": direction,
         "terminated_at_s": terminated_at,
         "axle_height_change_m": extreme,
+        "peak_axle_dz_m": max(dz),
         "steps_crossed": steps,
         "distance_m": rows[-1]["x_m"],
         "max_abs_pitch_deg": max(abs(r["pitch_deg"]) for r in rows),

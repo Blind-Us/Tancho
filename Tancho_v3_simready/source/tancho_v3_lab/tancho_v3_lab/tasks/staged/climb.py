@@ -9,9 +9,9 @@ simulated operator presses the triggers:
 
 * Auto (the useful presses): a privileged height scan in front of the robot
   (never an actor input) finds a rise > ``rise_threshold`` ahead of a wheel
-  while the robot is commanded forward.  When the edge comes within a per-env
-  random look-ahead distance (an early or late human), the trigger on that
-  wheel's side is pressed and held for ``hold_s`` (one press per edge, then ``cooldown_s``).  A square approach shows the edge to both wheels at once -> hop;
+  while the robot is commanded forward.  When the tire will reach the edge
+  within a per-env random time (0.1-0.3 s: an early or late human), the
+  trigger on that wheel's side is pressed and held for ``hold_s`` (one press per edge, then ``cooldown_s``).  A square approach shows the edge to both wheels at once -> hop;
   a diagonal approach reaches one wheel first -> single-leg lift.
 * Random: occasional presses (L, R or both, 0.2-0.5 s) anywhere, so a press on
   flat ground must not cause a fall.
@@ -151,11 +151,17 @@ class ClimbTriggerCommand(CommandTerm):
         # -- auto (attentive operator)
         dx, dy, hit_z, _ = _wheel_scan(self._env, self.cfg.sensor_name)
         ground = _ground_under(dx, dy, hit_z)  # (N, 2)
-        ahead = (dy.abs() < 0.04) & (dx > 0.03) & (dx < self.lookahead.view(-1, 1, 1))
-        z_ahead = torch.where(ahead, hit_z.unsqueeze(1).expand_as(dx), torch.full_like(dx, -10.0)).max(dim=-1).values
-        rise = z_ahead - ground
+        # Nearest ray ahead of each wheel that is a rise; the operator presses when the
+        # tire front will reach it within this env's reaction time (time-to-contact),
+        # so the 0.4 s lift lands on the edge whatever the speed.
+        ahead = (dy.abs() < 0.04) & (dx > 0.0) & (dx < self.cfg.scan_ahead_m)
+        is_rise = ahead & ((hit_z.unsqueeze(1) - ground.unsqueeze(-1)) > self.cfg.rise_threshold)
+        edge_dx = torch.where(is_rise, dx, torch.full_like(dx, 10.0)).min(dim=-1).values  # (N, 2)
+        gap = (edge_dx - WHEEL_RADIUS_M).clamp(min=0.0)
+        vx = self._env.scene["robot"].data.root_lin_vel_b[:, 0].clamp(min=0.05)
+        ttc = gap / vx.unsqueeze(1)
         vx_cmd = self._env.command_manager.get_command(self.cfg.velocity_command_name)[:, 0]
-        need = (rise > self.cfg.rise_threshold) & (vx_cmd > 0.05).unsqueeze(1) & self.attentive.unsqueeze(1)
+        need = (edge_dx < 9.0) & (ttc < self.lookahead.unsqueeze(1)) & (vx_cmd > 0.05).unsqueeze(1) & self.attentive.unsqueeze(1)
         # One press per edge: hold for hold_s, then a cooldown before the same side can
         # fire again (otherwise a robot parked at an edge keeps the trigger held and
         # could farm the lift rewards).
@@ -191,8 +197,9 @@ class ClimbTriggerCommandCfg(CommandTermCfg):
     velocity_command_name: str = "base_velocity"
     rise_threshold: float = 0.012
     """A rise above this (m) ahead of a wheel counts as a step (rough bumps peak at 2 cm p-p, mostly below)."""
-    lookahead_range: tuple[float, float] = (0.08, 0.30)
-    """Distance ahead of the wheel contact at which the operator presses (m)."""
+    lookahead_range: tuple[float, float] = (0.1, 0.3)
+    """Operator reaction: press when the tire front will reach the edge within this time (s), per env."""
+    scan_ahead_m: float = 0.33
     hold_s: float = 0.4
     cooldown_s: float = 0.8
     recent_s: float = 0.6
