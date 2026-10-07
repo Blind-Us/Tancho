@@ -216,6 +216,11 @@ class ClimbTriggerCommand(CommandTerm):
         busy = self.phase < REF_LOCKOUT_S
         self.queued = self.queued | (edge & busy)
         start = (edge & ~busy) | (self.queued & ~busy)
+        # A hop pressed while one leg is still lifting waits for that leg, so both
+        # legs start together (otherwise LT then LT+RT gives two staggered lifts).
+        both = (edge | self.queued).all(dim=1, keepdim=True) & busy.any(dim=1, keepdim=True)
+        self.queued = self.queued | (both & edge)
+        start = start & ~both
         self.queued = self.queued & ~start
         self.phase = torch.where(start, torch.zeros_like(self.phase), self.phase)
         self.trigger = new

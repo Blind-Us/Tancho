@@ -9,8 +9,9 @@ collide with each other).  Presses go through the command term's own random-pres
 slot, so trigger edges and phases follow the training code path.
 
 Per scenario: did the robot fall (first termination), and the smallest peak
-clearance of a pressed wheel over all presses (0.1-0.6 s after each reference
-lift starts; a press during a running lift is queued, see ``climb.py``).  Summary: failure rate per pattern / spacing / speed.
+clearance over all reference lifts the command started (0.1-0.6 s into each
+lift; a press during a running lift is queued, see ``climb.py``), and how many
+lifts each side got for its presses.  Summary: failure rate per pattern / spacing / speed.
 """
 
 from __future__ import annotations
@@ -39,7 +40,6 @@ import torch  # noqa: E402
 from isaaclab_tasks.utils import parse_env_cfg  # noqa: E402
 
 import tancho_v3_lab.tasks  # noqa: E402,F401
-from tancho_v3_lab.tasks.staged.climb import REF_T_END  # noqa: E402
 from tancho_v3_lab.tasks.staged.scene import WHEEL_RADIUS_M  # noqa: E402
 
 L, R, B = (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)
@@ -68,34 +68,6 @@ def scenarios():
         if press >= gap:
             continue  # the trigger would never be released between presses
         out.append({"pattern": name, "modes": pat, "gap": gap, "press": press, "vx": vx, "wz": wz})
-    return out
-
-
-def lift_starts(s):
-    """Reference-lift start time per press under the command's queue rule (one
-    queued edge per side while that side's 0.4 s lift runs); None if merged."""
-    phase_start = {0: -10.0, 1: -10.0}
-    queued = {0: None, 1: None}
-    out = []
-    for j, m in enumerate(s["modes"]):
-        edge = T0 + j * s["gap"]
-        t_side = []
-        for side in (0, 1):
-            if m[side] <= 0:
-                continue
-            # Release any queued lift that started before this edge.
-            if queued[side] is not None and phase_start[side] + REF_T_END <= edge:
-                phase_start[side] = phase_start[side] + REF_T_END
-                queued[side] = None
-            if edge >= phase_start[side] + REF_T_END:
-                phase_start[side] = edge
-                t_side.append(edge)
-            elif queued[side] is None:
-                queued[side] = j
-                t_side.append(phase_start[side] + REF_T_END)
-            else:
-                t_side.append(None)
-        out.append(None if any(t is None for t in t_side) else max(t_side))
     return out
 
 
@@ -138,21 +110,14 @@ def main() -> int:
     obs, _ = env.reset()
     ground = robot.data.body_pos_w[:, wheel_ids, 2].mean(dim=1) - WHEEL_RADIUS_M  # (n,)
     fell_at = torch.full((n,), -1.0, device=dev)
-    # Per env, per press: peak clearance of the pressed wheels.
-    max_presses = max(len(s["modes"]) for s in sc)
-    peak = torch.zeros(n, max_presses, 2, device=dev)
-    want = torch.zeros(n, max_presses, 2, device=dev)
-    win_start = torch.full((n, max_presses), 1.0e6, device=dev)
-    win_end = torch.full((n, max_presses), -1.0, device=dev)
-    for i, s in enumerate(sc):
-        for j, (m, t_lift) in enumerate(zip(s["modes"], lift_starts(s))):
-            want[i, j] = torch.tensor(m, device=dev)
-            if t_lift is None:
-                continue  # merged into an already queued lift: nothing extra expected
-            # Peak tuck is 0.1-0.25 s into the lift; skip the previous lift's tail.
-            win_start[i, j] = t_lift + 0.1
-            win_end[i, j] = t_lift + 0.6
-
+    # Lifts as the command term actually starts them (its phase resets to 0); per side,
+    # the peak clearance 0.1-0.6 s into each lift (peak tuck is 0.1-0.25 s in).
+    MAXL = 8
+    lift_t = torch.full((n, 2, MAXL), -1.0, device=dev)
+    lift_peak = torch.zeros(n, 2, MAXL, device=dev)
+    n_lifts = torch.zeros(n, 2, dtype=torch.long, device=dev)
+    prev_phase = climb.phase.clone()
+    ar = torch.arange(MAXL, device=dev)
     steps = round(t_end / dt)
     for k in range(steps):
         t = k * dt
@@ -167,12 +132,18 @@ def main() -> int:
         t += dt
         alive = fell_at < 0
         clear = robot.data.body_pos_w[:, wheel_ids, 2] - WHEEL_RADIUS_M - ground.unsqueeze(1)  # (n, 2)
-        in_win = ((t >= win_start) & (t < win_end) & alive.unsqueeze(1)).unsqueeze(-1)  # (n, P, 1)
-        peak = torch.where(in_win, torch.maximum(peak, clear.unsqueeze(1)), peak)
+        started = (climb.phase < prev_phase) & alive.unsqueeze(1)  # (n, 2)
+        prev_phase = climb.phase.clone()
+        slot = (ar == n_lifts.clamp(max=MAXL - 1).unsqueeze(-1)) & started.unsqueeze(-1)
+        lift_t = torch.where(slot, torch.full_like(lift_t, t), lift_t)
+        n_lifts += started.long()
+        in_win = (lift_t >= 0) & (t >= lift_t + 0.1) & (t < lift_t + 0.6) & alive.view(-1, 1, 1)
+        lift_peak = torch.where(in_win, torch.maximum(lift_peak, clear.unsqueeze(-1)), lift_peak)
         fell_at = torch.where(term.bool() & alive, torch.full_like(fell_at, t), fell_at)
 
-    counted = (win_end > 0).unsqueeze(-1)
-    min_clear = torch.where((want > 0) & counted, peak, torch.full_like(peak, 1.0)).amin(dim=(1, 2))
+    min_clear = torch.where(lift_t >= 0, lift_peak, torch.full_like(lift_peak, 1.0)).amin(dim=(1, 2))
+    # Presses per side, and the fewest lifts the queue rule can merge them into.
+    pressed = [[sum(m[side] > 0 for m in s["modes"]) for side in (0, 1)] for s in sc]
     rows = []
     for i, s in enumerate(sc):
         rows.append(
@@ -180,8 +151,14 @@ def main() -> int:
                 "pattern": s["pattern"], "gap": s["gap"], "press": s["press"], "vx": s["vx"], "wz": s["wz"],
                 "fell_at_s": round(float(fell_at[i]), 2) if fell_at[i] >= 0 else None,
                 "min_clear_mm": round(float(min_clear[i]) * 1000, 1),
+                "presses_LR": pressed[i],
+                "lifts_LR": n_lifts[i].tolist(),
             }
         )
+
+    def weak_lift(row):
+        missing = any(p > 0 and l == 0 for p, l in zip(row["presses_LR"], row["lifts_LR"]))
+        return missing or row["min_clear_mm"] < args.min_clear * 1000
 
     def rate(key):
         groups = {}
@@ -189,11 +166,11 @@ def main() -> int:
             g = groups.setdefault(row[key] if not isinstance(key, tuple) else tuple(row[x] for x in key), [0, 0, 0])
             g[0] += 1
             g[1] += row["fell_at_s"] is not None
-            g[2] += row["fell_at_s"] is None and row["min_clear_mm"] < args.min_clear * 1000
+            g[2] += row["fell_at_s"] is None and weak_lift(row)
         return {str(k): {"n": v[0], "fall": round(v[1] / v[0], 3), "weak_lift": round(v[2] / v[0], 3)} for k, v in groups.items()}
 
     falls = sum(r["fell_at_s"] is not None for r in rows)
-    weak = sum(r["fell_at_s"] is None and r["min_clear_mm"] < args.min_clear * 1000 for r in rows)
+    weak = sum(r["fell_at_s"] is None and weak_lift(r) for r in rows)
     summary = {
         "checkpoint": str(args.checkpoint.resolve()),
         "guidance": args.guidance,

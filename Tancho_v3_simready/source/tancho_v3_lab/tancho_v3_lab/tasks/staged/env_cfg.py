@@ -360,3 +360,23 @@ class TanchoV3ClimbHopPlayEnvCfg(TanchoV3ClimbHopEnvCfg):
         # Presses come from the script / keyboard only.
         self.commands.climb.burst_prob = 0.0
         self.commands.climb.both_skew_s = 0.0
+
+
+# -- stage 6A-free: the same lift / hop without the reference injection ------------
+@configclass
+class HopFreeCurriculumCfg(TerrainCurriculumCfg):
+    # Full injection for 100 iterations, then linearly to 0 by 1100; the leg_reference
+    # imitation reward stays, so the weights take over the lift as the injection fades.
+    reference_guidance = CurrTerm(func=reference_guidance, params={"hold_iters": 100, "anneal_iters": 1000})
+
+
+@configclass
+class TanchoV3ClimbHopFreeEnvCfg(TanchoV3ClimbHopEnvCfg):
+    """Started from a ClimbHop checkpoint; deploys with no Pi-side lift table."""
+
+    curriculum: HopFreeCurriculumCfg = HopFreeCurriculumCfg()
+
+
+@configclass
+class TanchoV3ClimbHopFreePlayEnvCfg(TanchoV3ClimbHopPlayEnvCfg):
+    pass

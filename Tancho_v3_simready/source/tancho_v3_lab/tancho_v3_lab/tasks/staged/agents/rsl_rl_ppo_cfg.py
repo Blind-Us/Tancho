@@ -81,3 +81,10 @@ class TanchoV3ClimbFreePPORunnerCfg(TanchoV3WalkPPORunnerCfg):
     # B2, started from the B1 checkpoint.
     max_iterations = 1500
     experiment_name = "tancho_v3_climb_free"
+
+
+@configclass
+class TanchoV3ClimbHopFreePPORunnerCfg(TanchoV3WalkPPORunnerCfg):
+    # From a ClimbHop checkpoint (--keep_obs_norm); injection reaches 0 at iteration 1100.
+    max_iterations = 1500
+    experiment_name = "tancho_v3_climb_hop_free"
