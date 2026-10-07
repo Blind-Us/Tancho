@@ -83,6 +83,18 @@ def recover_success(env, env_ids) -> float:
     return env._recover_success
 
 
+def upright_cos(env) -> torch.Tensor:
+    """cos(tilt) in [-1, 1]: unlike sin^2 it still has a slope when lying flat."""
+    return -env.scene["robot"].data.projected_gravity_b[:, 2]
+
+
+def fixed_start_tilt(env, env_ids, tilt: float = MAX_TILT_RAD) -> float:
+    """Curriculum stand-in: always start within +/- ``tilt``."""
+    _max_tilt(env)
+    env._recover_max_tilt = tilt
+    return tilt
+
+
 def is_up(env, height_ratio: float = 0.85) -> torch.Tensor:
     """1 when the body is within 15 deg of vertical and the root is near standing height."""
     robot = env.scene["robot"]

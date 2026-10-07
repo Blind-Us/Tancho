@@ -33,8 +33,11 @@ parser.add_argument("--gap", type=float, default=3.0, help="s between rising edg
 parser.add_argument("--press-s", type=float, default=0.4, help="s each trigger is held")
 parser.add_argument("--yaw", type=float, default=0.0, help="yaw-rate command (rad/s)")
 parser.add_argument("--output", type=Path, required=True)
+parser.add_argument("--video", type=Path, default=None, help="record an mp4 into this folder (needs --enable_cameras)")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
+if args.video:
+    args.enable_cameras = True
 simulation_app = AppLauncher(args).app
 
 import gymnasium as gym  # noqa: E402
@@ -61,7 +64,13 @@ def main() -> int:
     cfg.commands.climb.random_press_prob = 0.0
     cfg.commands.climb.auto_prob = 0.0
     cfg.actions.leg_pos.guidance_scale = args.guidance
-    env = gym.make(args.task, cfg=cfg)
+    env = gym.make(args.task, cfg=cfg, render_mode="rgb_array" if args.video else None)
+    if args.video:
+        steps = round((2.0 + GAP_S * (len(schedule) - 1) + 3.0) / cfg.sim.dt / cfg.decimation) - 2
+        env = gym.wrappers.RecordVideo(
+            env, video_folder=str(args.video), step_trigger=lambda step: step == 0, video_length=steps,
+            name_prefix=args.output.stem, disable_logger=True,
+        )
     core = env.unwrapped
     robot = core.scene["robot"]
     vel = core.command_manager.get_term("base_velocity")

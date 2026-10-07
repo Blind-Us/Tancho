@@ -443,9 +443,34 @@ class TanchoV3RecoverEnvCfg(TanchoV3ClimbHopEnvCfg):
 
 
 @configclass
+class RecoverWideCurriculumCfg:
+    # Run 3: run 2's curriculum stalled at 30 deg (63% up, promote needs 80%), so the
+    # policy never saw a lying robot.  Start anywhere in +/-90 deg from the beginning.
+    max_start_tilt = CurrTerm(func=recover.fixed_start_tilt)
+    upright_share = CurrTerm(func=recover.recover_success)
+
+
+@configclass
+class RecoverWideRewardsCfg(RecoverRewardsCfg):
+    # Dense pull toward vertical that does not flatten out when lying (sin^2 does).
+    upright_cos = RewTerm(func=recover.upright_cos, weight=2.0)
+
+
+@configclass
+class TanchoV3RecoverWideEnvCfg(TanchoV3RecoverEnvCfg):
+    rewards: RecoverWideRewardsCfg = RecoverWideRewardsCfg()
+    curriculum: RecoverWideCurriculumCfg = RecoverWideCurriculumCfg()
+
+
+@configclass
 class TanchoV3RecoverPlayEnvCfg(TanchoV3RecoverEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         _to_play(self)
         self.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, "flat", 0.0, size=16.0), max_init_level=None)
         self.events.reset_fallen = None  # scripts set the start pose
+
+
+@configclass
+class TanchoV3RecoverWidePlayEnvCfg(TanchoV3RecoverPlayEnvCfg):
+    pass

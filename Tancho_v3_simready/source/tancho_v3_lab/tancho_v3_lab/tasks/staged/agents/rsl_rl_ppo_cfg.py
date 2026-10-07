@@ -95,3 +95,9 @@ class TanchoV3RecoverPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
     # From a ClimbHop(Free) checkpoint (--keep_obs_norm).
     max_iterations = 1500
     experiment_name = "tancho_v3_recover"
+
+
+@configclass
+class TanchoV3RecoverWidePPORunnerCfg(TanchoV3RecoverPPORunnerCfg):
+    max_iterations = 1000
+    experiment_name = "tancho_v3_recover_wide"
