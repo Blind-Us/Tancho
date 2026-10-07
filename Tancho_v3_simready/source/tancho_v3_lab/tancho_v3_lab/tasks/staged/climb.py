@@ -318,3 +318,21 @@ def joint_deviation_l1_gated(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, 
 
 def lin_vel_z_l2_gated(env: ManagerBasedRLEnv, command_name: str = "climb") -> torch.Tensor:
     return mdp.lin_vel_z_l2(env) * _free(env, command_name)
+
+
+# -- "lift and fall forward": relax the attitude constraints in the lift window ------
+def flat_orientation_l2_gated(env: ManagerBasedRLEnv, command_name: str = "climb") -> torch.Tensor:
+    return mdp.flat_orientation_l2(env) * _free(env, command_name)
+
+
+def ang_vel_xy_l2_gated(env: ManagerBasedRLEnv, command_name: str = "climb") -> torch.Tensor:
+    return mdp.ang_vel_xy_l2(env) * _free(env, command_name)
+
+
+def bad_orientation_gated(env: ManagerBasedRLEnv, limit_angle: float, limit_angle_lift: float, command_name: str = "climb") -> torch.Tensor:
+    """Tilt failure at ``limit_angle``, or ``limit_angle_lift`` while a trigger is
+    (recently) pressed, so the body may pitch forward to carry the wheels over an edge."""
+    pressed = env.command_manager.get_term(command_name).recently_pressed > 0.0
+    limit = torch.where(pressed, torch.full_like(pressed, limit_angle_lift, dtype=torch.float), torch.full_like(pressed, limit_angle, dtype=torch.float))
+    g = env.scene["robot"].data.projected_gravity_b
+    return torch.acos((-g[:, 2]).clamp(-1.0, 1.0)) > limit

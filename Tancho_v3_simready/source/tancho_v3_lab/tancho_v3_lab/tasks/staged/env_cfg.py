@@ -15,6 +15,8 @@ upright reset, one robot.
 
 from __future__ import annotations
 
+import math
+
 import isaaclab.envs.mdp as mdp
 from isaaclab.envs import ManagerBasedRLEnvCfg, ViewerCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
@@ -25,9 +27,9 @@ from isaaclab.utils import configclass
 from .actions import ClimbActionsCfg, FullActionsCfg, WheelOnlyActionsCfg
 from .observations import ClimbObservationsCfg, FullObservationsCfg, WheelOnlyObservationsCfg
 from .rewards import ClimbRewardsCfg, FullStandRewardsCfg, FullWalkRewardsCfg, WheelOnlyRewardsCfg
-from .scene import DECIMATION, EPISODE_LENGTH_S, NOMINAL_FRICTION, SIM_DT_S, ClimbSceneCfg, FullSceneCfg, WheelOnlySceneCfg
+from .scene import FAILURE_TILT_RAD, DECIMATION, EPISODE_LENGTH_S, NOMINAL_FRICTION, SIM_DT_S, ClimbSceneCfg, FullSceneCfg, WheelOnlySceneCfg
 from .terminations import FullTerminationsCfg, WheelOnlyTerminationsCfg
-from .climb import ClimbTriggerCommandCfg, reference_guidance
+from .climb import ClimbTriggerCommandCfg, bad_orientation_gated, reference_guidance
 from .terrain import CLIMB_GENERATOR, HOP_GENERATOR, ROUGH_GENERATOR, STEP_GENERATOR, make_terrain, play_generator, terrain_levels_tracking
 
 
@@ -281,6 +283,9 @@ class TanchoV3ClimbEnvCfg(TanchoV3WalkRoughEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.terrain = make_terrain(CLIMB_GENERATOR)
+        # Tilt limit 15 deg normally, 35 deg in the lift window (lift and fall forward).
+        self.terminations.tilt.func = bad_orientation_gated
+        self.terminations.tilt.params = {"limit_angle": FAILURE_TILT_RAD, "limit_angle_lift": math.radians(35.0)}
 
 
 @configclass

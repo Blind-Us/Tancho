@@ -123,5 +123,9 @@ class ClimbRewardsCfg(FullWalkRewardsCfg):
     def __post_init__(self):
         super().__post_init__()
         self.mirror.func = climb.mirror_leg_l2_gated
+        # Lift and fall forward: no upright / pitch-rate cost in the lift window
+        # (B1 kept the body upright by approaching at 0.16 m/s and never crossed).
+        self.upright.func = climb.flat_orientation_l2_gated
+        self.ang_vel_xy.func = climb.ang_vel_xy_l2_gated
         self.leg_deviation.func = climb.joint_deviation_l1_gated
         self.vertical_vel.func = climb.lin_vel_z_l2_gated
