@@ -55,6 +55,20 @@ def pitch_deg(quat_wxyz: torch.Tensor) -> float:
     return math.degrees(math.asin(max(-1.0, min(1.0, 2.0 * (w * y - z * x)))))
 
 
+def _climb_fields(core, robot) -> dict:
+    """Trigger state and leg angles (Climb tasks only)."""
+    if "climb" not in core.command_manager.active_terms:
+        return {}
+    term = core.command_manager.get_term("climb")
+    q = (robot.data.joint_pos[0] - robot.data.default_joint_pos[0]).tolist()
+    names = robot.joint_names
+    return {
+        "trig_L": float(term.trigger[0, 0]),
+        "trig_R": float(term.trigger[0, 1]),
+        **{f"d{n.replace('joint_', '')}_rad": round(v, 3) for n, v in zip(names, q) if "wheel" not in n},
+    }
+
+
 def run(direction: str) -> tuple[dict, list[dict]]:
     sub = "step_up" if direction == "up" else "step_down"
     cfg = parse_env_cfg(args.task, device=args.device, num_envs=1, use_fabric=True)
@@ -91,6 +105,7 @@ def run(direction: str) -> tuple[dict, list[dict]]:
             "pitch_deg": pitch_deg(robot.data.root_quat_w[0]),
             "axle_dz_L_m": float(axle[0]) - axle_z0,
             "axle_dz_R_m": float(axle[1]) - axle_z0,
+            **_climb_fields(core, robot),
         })
         if bool(term[0]):
             terminated_at = t
