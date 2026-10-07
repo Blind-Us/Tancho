@@ -13,7 +13,7 @@ Xbox triggers on the keyboard (hold):
 
   Q          LT: lift the left leg
   E          RT: lift the right leg
-  SPACE      LT+RT: short hop
+  J (or Q+E) LT+RT: short hop   (not SPACE: Isaac Sim's play / pause key)
 
 ``--terrain flat|rough|step_up|step_down`` picks one 16 m tile (rough = 2 cm
 bumps, steps = 3 cm); ``--guidance`` is the reference-lift injection (the stage-A
@@ -52,7 +52,8 @@ import tancho_v3_lab.tasks  # noqa: E402,F401
 # (vx m/s, yaw rate rad/s) per speed level
 SPEED_LEVELS = {"KEY_1": (0.2, 0.5), "KEY_2": (0.4, 0.8), "KEY_3": (0.6, 1.0)}
 MOVE_KEYS = {"W": (1, 0), "S": (-1, 0), "A": (0, 1), "D": (0, -1)}
-TRIGGER_KEYS = {"Q": (1.0, 0.0), "E": (0.0, 1.0), "SPACE": (1.0, 1.0)}
+# Not SPACE: in the Isaac Sim window it toggles timeline play / pause.
+TRIGGER_KEYS = {"Q": (1.0, 0.0), "E": (0.0, 1.0), "J": (1.0, 1.0)}
 
 
 class WasdKeyboard:
