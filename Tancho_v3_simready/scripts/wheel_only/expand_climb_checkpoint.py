@@ -8,8 +8,9 @@
   leg action std and the normalizer statistics of the leg ``last_action``
   inputs are multiplied by 0.25/0.6, so the same weights command the same
   joint targets as before.
-* Normalizer count is lowered to ``--norm-count`` so the statistics of the new
-  inputs adapt within a few iterations (train with ``--keep_obs_norm``).
+* Normalizer statistics are kept (train with ``--keep_obs_norm``); the new
+  inputs get fixed priors.  ``--norm-count`` lowers the count so they adapt,
+  but that also lets every other input drift at the start.
 
 Usage:
     python scripts/wheel_only/expand_climb_checkpoint.py <model.pt> <out.pt>
@@ -35,7 +36,10 @@ CRITIC_NEW = [
 ]
 
 
-def _expand(sd: dict, blocks: list[dict], leg_obs: list[int], k: float, count: float) -> None:
+NORM_EPS = 1.0e-2  # rsl_rl EmpiricalNormalization: (x - mean) / (std + eps)
+
+
+def _expand(sd: dict, blocks: list[dict], leg_obs: list[int], k: float, count: float | None) -> None:
     w = sd["mlp.0.weight"]
     extra = sum(b["dims"] for b in blocks)
     sd["mlp.0.weight"] = torch.cat([w, torch.zeros(w.shape[0], extra, dtype=w.dtype)], dim=1)
@@ -44,21 +48,25 @@ def _expand(sd: dict, blocks: list[dict], leg_obs: list[int], k: float, count: f
     mean = sd["obs_normalizer._mean"].clone()
     var = sd["obs_normalizer._var"].clone()
     # Leg last-action inputs shrink by k at the new scale: keep normalized values unchanged.
+    # Exact including eps: std' + eps = k * (std + eps).
+    std = var.sqrt()
     mean[:, leg_obs] *= k
-    var[:, leg_obs] *= k * k
+    std[:, leg_obs] = (k * (std[:, leg_obs] + NORM_EPS) - NORM_EPS).clamp(min=1.0e-6)
+    var = std.square()
     sd["obs_normalizer._mean"] = torch.cat([mean, *means], dim=1)
     sd["obs_normalizer._var"] = torch.cat([var, *vars_], dim=1)
     sd["obs_normalizer._std"] = sd["obs_normalizer._var"].sqrt()
-    sd["obs_normalizer.count"] = torch.tensor(count, dtype=sd["obs_normalizer.count"].dtype)
+    if count is not None:
+        sd["obs_normalizer.count"] = torch.tensor(count, dtype=sd["obs_normalizer.count"].dtype)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("src")
     parser.add_argument("dst")
-    parser.add_argument("--norm-count", type=float, default=1.0e6)
-    parser.add_argument("--leg-std", type=float, default=0.15, help="leg action std after expansion (new units)")
-    parser.add_argument("--wheel-std", type=float, default=0.05)
+    parser.add_argument("--norm-count", type=float, default=None)
+    parser.add_argument("--leg-std", type=float, default=0.05, help="minimum leg action std after expansion (new units)")
+    parser.add_argument("--wheel-std", type=float, default=0.0, help="minimum wheel action std")
     args = parser.parse_args()
 
     ckpt = torch.load(args.src, map_location="cpu", weights_only=False)
