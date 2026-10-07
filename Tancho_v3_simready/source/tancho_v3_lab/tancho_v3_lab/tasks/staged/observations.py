@@ -81,3 +81,24 @@ class FullObservationsCfg:
 
     policy: PolicyCfg = PolicyCfg()
     critic: CriticCfg = CriticCfg()
+
+
+_HEIGHT_SCANNER = SceneEntityCfg("height_scanner")
+
+
+@configclass
+class ClimbObservationsCfg:
+    @configclass
+    class PolicyCfg(FullObservationsCfg.PolicyCfg):
+        """27 dims: the 25 walk dims + LT, RT trigger (0/1) appended last."""
+
+        climb_trigger = ObsTerm(func=mdp.generated_commands, params={"command_name": "climb"})
+
+    @configclass
+    class CriticCfg(FullObservationsCfg.CriticCfg):
+        climb_trigger = ObsTerm(func=mdp.generated_commands, params={"command_name": "climb"})
+        # Root height above each scan point minus the nominal 0.26 m (40 points).
+        height_scan = ObsTerm(func=mdp.height_scan, params={"sensor_cfg": _HEIGHT_SCANNER, "offset": 0.26}, clip=(-0.5, 0.5))
+
+    policy: PolicyCfg = PolicyCfg()
+    critic: CriticCfg = CriticCfg()

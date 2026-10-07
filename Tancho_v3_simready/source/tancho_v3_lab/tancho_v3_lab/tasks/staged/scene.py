@@ -19,7 +19,7 @@ import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import ContactSensorCfg, ImuCfg
+from isaaclab.sensors import ContactSensorCfg, ImuCfg, RayCasterCfg, patterns
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 
@@ -62,6 +62,9 @@ LEG_DAMPING = 0.2
 LEG_EFFORT_LIMIT_NM = 12.5
 LEG_VELOCITY_LIMIT_RAD_S = 12.5
 LEG_ACTION_SCALE_RAD = 0.25
+# Climb stage (operator-triggered leg lift / hop): wider leg range.  URDF limits
+# are thigh +/-1.57, calf 0..3 rad, so nominal +/-0.6 stays inside.
+CLIMB_LEG_ACTION_SCALE_RAD = 0.6
 
 # -- IMU mounting on base_link_root ---------------------------------------------------
 IMU_POS_ROOT = (-0.00835741999, 0.0000000160456, -0.0294337942)
@@ -180,3 +183,17 @@ class FullSceneCfg(WheelOnlySceneCfg):
     robot: ArticulationCfg = FULL_ROBOT
     # Only used by the non-wheel contact termination.
     contact_forces = ContactSensorCfg(prim_path="/World/envs/env_.*/Robot/.*", history_length=3)
+
+
+@configclass
+class ClimbSceneCfg(FullSceneCfg):
+    # Privileged terrain scan (critic, simulated operator, lift reward); never an actor input.
+    # Yaw-aligned grid from 2.5 cm behind to 32.5 cm ahead of the root, y = -0.1..0.1 m.
+    height_scanner = RayCasterCfg(
+        prim_path="/World/envs/env_.*/Robot/base_link_root",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.15, 0.0, 20.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=[0.35, 0.2]),
+        debug_vis=False,
+        mesh_prim_paths=["/World/ground"],
+    )

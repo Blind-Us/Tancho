@@ -119,6 +119,34 @@ STEP_GENERATOR = TerrainGeneratorCfg(
     },
 )
 
+CLIMB_GENERATOR = TerrainGeneratorCfg(
+    seed=0,
+    size=(6.0, 6.0),
+    border_width=10.0,
+    num_rows=10,
+    num_cols=12,
+    horizontal_scale=0.05,
+    vertical_scale=0.001,
+    slope_threshold=None,
+    use_cache=False,
+    curriculum=True,
+    difficulty_range=(0.0, 1.0),
+    sub_terrains={
+        "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.1),
+        "rough": ScaledRandomUniformTerrainCfg(
+            proportion=0.15, amplitude_range=(0.0, 0.02), noise_range=(0.0, 0.0), noise_step=0.001,
+            downsampled_scale=0.1, border_width=0.25,
+        ),
+        # Step up is the new skill: 1 -> 3 cm over the levels.
+        "step_up": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+            proportion=0.5, step_height_range=(0.01, 0.03), step_width=0.6, platform_width=1.5, border_width=0.3
+        ),
+        "step_down": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.25, step_height_range=(0.01, 0.03), step_width=0.6, platform_width=1.5, border_width=0.3
+        ),
+    },
+)
+
 
 def make_terrain(generator: TerrainGeneratorCfg, max_init_level: int | None = 2) -> TerrainImporterCfg:
     return TerrainImporterCfg(

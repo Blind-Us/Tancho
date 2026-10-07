@@ -7,6 +7,7 @@
 | 3     | TanchoV3-Walk-Flat-v0          | 6-DOF   | vx / yaw rate    |
 | 4     | TanchoV3-Walk-Rough-v0         | 6-DOF   | vx / yaw rate, bumps + slopes |
 | 5     | TanchoV3-Walk-Step-v0          | 6-DOF   | vx / yaw rate, 0 -> 3 cm steps |
+| 6     | TanchoV3-Climb-v0              | 6-DOF, legs +/-0.6 rad | vx / yaw rate + LT/RT trigger, 1 -> 3 cm steps |
 
 Each has a ``-Play-v0`` variant: nominal physics, no noise, no randomization,
 upright reset, one robot.
@@ -21,12 +22,13 @@ from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 
-from .actions import FullActionsCfg, WheelOnlyActionsCfg
-from .observations import FullObservationsCfg, WheelOnlyObservationsCfg
-from .rewards import FullStandRewardsCfg, FullWalkRewardsCfg, WheelOnlyRewardsCfg
-from .scene import DECIMATION, EPISODE_LENGTH_S, NOMINAL_FRICTION, SIM_DT_S, FullSceneCfg, WheelOnlySceneCfg
+from .actions import ClimbActionsCfg, FullActionsCfg, WheelOnlyActionsCfg
+from .observations import ClimbObservationsCfg, FullObservationsCfg, WheelOnlyObservationsCfg
+from .rewards import ClimbRewardsCfg, FullStandRewardsCfg, FullWalkRewardsCfg, WheelOnlyRewardsCfg
+from .scene import DECIMATION, EPISODE_LENGTH_S, NOMINAL_FRICTION, SIM_DT_S, ClimbSceneCfg, FullSceneCfg, WheelOnlySceneCfg
 from .terminations import FullTerminationsCfg, WheelOnlyTerminationsCfg
-from .terrain import ROUGH_GENERATOR, STEP_GENERATOR, make_terrain, play_generator, terrain_levels_tracking
+from .climb import ClimbTriggerCommandCfg
+from .terrain import CLIMB_GENERATOR, ROUGH_GENERATOR, STEP_GENERATOR, make_terrain, play_generator, terrain_levels_tracking
 
 
 # -- commands -------------------------------------------------------------------
@@ -233,3 +235,39 @@ class TanchoV3WalkStepPlayEnvCfg(TanchoV3WalkStepEnvCfg):
         self.commands.base_velocity.debug_vis = True
         self.curriculum = None
         self.scene.terrain = make_terrain(play_generator(STEP_GENERATOR, "step_up", 1.0, size=8.0), max_init_level=None)
+
+
+# -- stage 6: operator-triggered climbing ---------------------------------------
+@configclass
+class ClimbCommandsCfg(WalkCommandsCfg):
+    climb = ClimbTriggerCommandCfg()
+
+
+@configclass
+class TanchoV3ClimbEnvCfg(TanchoV3WalkRoughEnvCfg):
+    """Started from a rough-walk checkpoint expanded by ``scripts/wheel_only/expand_climb_checkpoint.py``."""
+
+    scene: ClimbSceneCfg = ClimbSceneCfg(num_envs=4096, env_spacing=2.0)
+    observations: ClimbObservationsCfg = ClimbObservationsCfg()
+    actions: ClimbActionsCfg = ClimbActionsCfg()
+    rewards: ClimbRewardsCfg = ClimbRewardsCfg()
+    commands: ClimbCommandsCfg = ClimbCommandsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain = make_terrain(CLIMB_GENERATOR)
+
+
+@configclass
+class TanchoV3ClimbPlayEnvCfg(TanchoV3ClimbEnvCfg):
+    """3 cm steps up; an always-attentive operator presses 15 cm before each edge, no random presses."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        _to_play(self)
+        self.commands.base_velocity.debug_vis = True
+        self.curriculum = None
+        self.scene.terrain = make_terrain(play_generator(CLIMB_GENERATOR, "step_up", 1.0, size=8.0), max_init_level=None)
+        self.commands.climb.auto_prob = 1.0
+        self.commands.climb.random_press_prob = 0.0
+        self.commands.climb.lookahead_range = (0.15, 0.15)

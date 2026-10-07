@@ -16,7 +16,7 @@ from __future__ import annotations
 import isaaclab.envs.mdp as mdp
 from isaaclab.utils import configclass
 
-from .scene import LEG_ACTION_SCALE_RAD, LEG_JOINTS, WHEEL_JOINTS, WHEEL_RATED_SPEED_RAD_S
+from .scene import CLIMB_LEG_ACTION_SCALE_RAD, LEG_ACTION_SCALE_RAD, LEG_JOINTS, WHEEL_JOINTS, WHEEL_RATED_SPEED_RAD_S
 
 _WHEEL_VEL = mdp.JointVelocityActionCfg(
     asset_name="robot",
@@ -46,3 +46,11 @@ class FullActionsCfg:
         preserve_order=True,
     )
     wheel_vel = _WHEEL_VEL
+
+
+@configclass
+class ClimbActionsCfg(FullActionsCfg):
+    """Same layout; legs reach nominal +/-0.6 rad so a wheel can be lifted onto a step."""
+
+    def __post_init__(self):
+        self.leg_pos.scale = CLIMB_LEG_ACTION_SCALE_RAD

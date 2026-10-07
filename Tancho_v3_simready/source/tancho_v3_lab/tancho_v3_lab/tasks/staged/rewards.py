@@ -21,6 +21,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 
 from ..direct.tancho_v3 import custom_rewards as cr
+from . import climb
 from .observations import LEGS, WHEELS
 from .scene import LEG_EFFORT_LIMIT_NM, WHEEL_EFFORT_LIMIT_NM, WHEEL_RADIUS_M
 
@@ -96,3 +97,17 @@ class FullWalkRewardsCfg(FullStandRewardsCfg):
         # the first walk policy held only ~60% of the commanded vx.  Kept at 0 so
         # the log columns stay comparable.
         self.capture_point.weight = 0.0
+
+
+@configclass
+class ClimbRewardsCfg(FullWalkRewardsCfg):
+    """Walk rewards + lift on trigger; posture terms pause while a trigger is (recently) pressed."""
+
+    # Pressed side's tire clearance, 5 cm = full credit: a 0.4 s full lift earns 0.8.
+    wheel_lift = RewTerm(func=climb.wheel_lift_on_trigger, weight=2.0)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.mirror.func = climb.mirror_leg_l2_gated
+        self.leg_deviation.func = climb.joint_deviation_l1_gated
+        self.vertical_vel.func = climb.lin_vel_z_l2_gated

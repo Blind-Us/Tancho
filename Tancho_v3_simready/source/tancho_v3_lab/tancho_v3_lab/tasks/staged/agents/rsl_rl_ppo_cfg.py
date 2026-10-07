@@ -61,3 +61,9 @@ class TanchoV3WalkRoughPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
 class TanchoV3WalkStepPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
     # Started from a rough-walk checkpoint with ``--init_checkpoint``.
     experiment_name = "tancho_v3_walk_step"
+
+
+@configclass
+class TanchoV3ClimbPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
+    # Started from an expanded rough-walk checkpoint (expand_climb_checkpoint.py).
+    experiment_name = "tancho_v3_climb"

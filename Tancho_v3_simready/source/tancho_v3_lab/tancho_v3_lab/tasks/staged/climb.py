@@ -1,0 +1,184 @@
+"""Operator-triggered step climbing (``TanchoV3-Climb``).
+
+On the robot the operator holds an Xbox controller: LT lifts the left leg, RT
+lifts the right leg, LT+RT together is a short hop.  The policy sees the two
+triggers as a 2-dim command ``climb`` (each 0 or 1, analog trigger > 0.5).
+
+A blind policy cannot know where a step is; the operator does.  In training a
+simulated operator presses the triggers:
+
+* Auto (the useful presses): a privileged height scan in front of the robot
+  (never an actor input) finds a rise > ``rise_threshold`` ahead of a wheel
+  while the robot is commanded forward.  When the edge comes within a per-env
+  random look-ahead distance (an early or late human), the trigger on that
+  wheel's side is pressed and held while the edge is ahead, plus
+  ``hold_s``.  A square approach shows the edge to both wheels at once -> hop;
+  a diagonal approach reaches one wheel first -> single-leg lift.
+* Random: occasional presses (L, R or both, 0.2-0.5 s) anywhere, so a press on
+  flat ground must not cause a fall.
+* ``auto_prob``: per resample, the share of time the operator is attentive.
+
+Reward terms here: wheel clearance on the pressed side, and gated versions of
+the posture terms (mirror, leg deviation, vertical velocity) that would
+otherwise forbid lifting a leg.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+import isaaclab.envs.mdp as mdp
+import torch
+from isaaclab.managers import CommandTerm, CommandTermCfg, SceneEntityCfg
+from isaaclab.utils import configclass
+from isaaclab.utils.math import quat_apply_inverse, yaw_quat
+
+from ..direct.tancho_v3 import custom_rewards as cr
+from .scene import WHEEL_RADIUS_M
+
+if TYPE_CHECKING:
+    from isaaclab.envs import ManagerBasedRLEnv
+
+WHEEL_BODIES = ["wheel_L", "wheel_R"]  # command[:, 0] = LT = left, command[:, 1] = RT = right
+
+
+def _wheel_scan(env: ManagerBasedRLEnv, sensor_name: str, robot_name: str = "robot"):
+    """Per wheel: local (yaw-frame) ray offsets from the wheel and ground heights.
+
+    Returns ``dx`` (N, 2, R), ``dy`` (N, 2, R), ``hit_z`` (N, R), ``wheel_z`` (N, 2).
+    """
+    sensor = env.scene.sensors[sensor_name]
+    robot = env.scene[robot_name]
+    if not hasattr(env, "_climb_wheel_ids"):
+        env._climb_wheel_ids = robot.find_bodies(WHEEL_BODIES, preserve_order=True)[0]
+    wheel_w = robot.data.body_pos_w[:, env._climb_wheel_ids]  # (N, 2, 3)
+    q = yaw_quat(robot.data.root_quat_w)
+    hits = sensor.data.ray_hits_w  # (N, R, 3)
+    rel = hits.unsqueeze(1) - wheel_w.unsqueeze(2)  # (N, 2, R, 3)
+    n, _, r, _ = rel.shape
+    rel_b = quat_apply_inverse(q.repeat_interleave(2 * r, dim=0), rel.reshape(-1, 3)).reshape(n, 2, r, 3)
+    hit_z = torch.nan_to_num(hits[..., 2], nan=-10.0, posinf=-10.0, neginf=-10.0)
+    return rel_b[..., 0], rel_b[..., 1], hit_z, wheel_w[..., 2]
+
+
+def _ground_under(dx, dy, hit_z):
+    """Ground height under each wheel: highest hit within 4 cm of the contact point."""
+    near = (dx.abs() < 0.04) & (dy.abs() < 0.04)
+    z = torch.where(near, hit_z.unsqueeze(1).expand_as(dx), torch.full_like(dx, -10.0))
+    z_max = z.max(dim=-1).values
+    # Fallback (no ray close enough): nearest ray.
+    nearest = (dx.square() + dy.square()).argmin(dim=-1, keepdim=True)
+    z_near = torch.gather(hit_z.unsqueeze(1).expand_as(dx), -1, nearest).squeeze(-1)
+    return torch.where(z_max > -9.0, z_max, z_near)
+
+
+class ClimbTriggerCommand(CommandTerm):
+    cfg: "ClimbTriggerCommandCfg"
+
+    def __init__(self, cfg: "ClimbTriggerCommandCfg", env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        n, dev = self.num_envs, self.device
+        self.trigger = torch.zeros(n, 2, device=dev)
+        self.random_mode = torch.zeros(n, 2, device=dev)
+        self.random_timer = torch.zeros(n, device=dev)
+        self.hold_mode = torch.zeros(n, 2, device=dev)
+        self.hold_timer = torch.zeros(n, 2, device=dev)
+        self.recent_timer = torch.zeros(n, device=dev)
+        self.lookahead = torch.full((n,), sum(cfg.lookahead_range) / 2, device=dev)
+        self.attentive = torch.ones(n, dtype=torch.bool, device=dev)
+        self.metrics["press_auto"] = torch.zeros(n, device=dev)
+        self.metrics["press_any"] = torch.zeros(n, device=dev)
+
+    @property
+    def command(self) -> torch.Tensor:
+        return self.trigger
+
+    @property
+    def recently_pressed(self) -> torch.Tensor:
+        """1 while a trigger is held and for ``recent_s`` after release (lift + landing)."""
+        return (self.recent_timer > 0.0).float()
+
+    def _update_metrics(self):
+        self.metrics["press_any"] += (self.trigger.max(dim=1).values > 0).float() * self._env.step_dt
+        self.metrics["press_auto"] += (self.hold_timer.max(dim=1).values > 0).float() * self._env.step_dt
+
+    def _resample_command(self, env_ids: Sequence[int]):
+        ids = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
+        k = len(ids)
+        self.lookahead[ids] = torch.empty(k, device=self.device).uniform_(*self.cfg.lookahead_range)
+        self.attentive[ids] = torch.rand(k, device=self.device) < self.cfg.auto_prob
+        start = torch.rand(k, device=self.device) < self.cfg.random_press_prob
+        mode_id = torch.randint(0, 3, (k,), device=self.device)  # 0 L, 1 R, 2 both
+        mode = torch.stack([(mode_id != 1).float(), (mode_id != 0).float()], dim=1)
+        self.random_mode[ids] = torch.where(start.unsqueeze(1), mode, self.random_mode[ids])
+        dur = torch.empty(k, device=self.device).uniform_(*self.cfg.random_press_s)
+        self.random_timer[ids] = torch.where(start, dur, torch.zeros_like(dur))
+
+    def _update_command(self):
+        dt = self._env.step_dt
+        # -- auto (attentive operator)
+        dx, dy, hit_z, _ = _wheel_scan(self._env, self.cfg.sensor_name)
+        ground = _ground_under(dx, dy, hit_z)  # (N, 2)
+        ahead = (dy.abs() < 0.04) & (dx > 0.03) & (dx < self.lookahead.view(-1, 1, 1))
+        z_ahead = torch.where(ahead, hit_z.unsqueeze(1).expand_as(dx), torch.full_like(dx, -10.0)).max(dim=-1).values
+        rise = z_ahead - ground
+        vx_cmd = self._env.command_manager.get_command(self.cfg.velocity_command_name)[:, 0]
+        need = (rise > self.cfg.rise_threshold) & (vx_cmd > 0.05).unsqueeze(1) & self.attentive.unsqueeze(1)
+        self.hold_timer = torch.where(need, torch.full_like(self.hold_timer, self.cfg.hold_s), (self.hold_timer - dt).clamp(min=0.0))
+        auto = (self.hold_timer > 0.0).float()
+        # -- random presses
+        rnd = self.random_mode * (self.random_timer > 0.0).float().unsqueeze(1)
+        self.random_timer = (self.random_timer - dt).clamp(min=0.0)
+        self.trigger = torch.maximum(auto, rnd)
+        pressed = self.trigger.max(dim=1).values > 0.0
+        self.recent_timer = torch.where(pressed, torch.full_like(self.recent_timer, self.cfg.recent_s), (self.recent_timer - dt).clamp(min=0.0))
+
+    def reset(self, env_ids: Sequence[int] | None = None):
+        ids = slice(None) if env_ids is None else env_ids
+        self.trigger[ids] = 0.0
+        self.hold_timer[ids] = 0.0
+        self.recent_timer[ids] = 0.0
+        return super().reset(env_ids)
+
+
+@configclass
+class ClimbTriggerCommandCfg(CommandTermCfg):
+    class_type: type = ClimbTriggerCommand
+    resampling_time_range: tuple[float, float] = (2.0, 5.0)
+    sensor_name: str = "height_scanner"
+    velocity_command_name: str = "base_velocity"
+    rise_threshold: float = 0.012
+    """A rise above this (m) ahead of a wheel counts as a step (rough bumps peak at 2 cm p-p, mostly below)."""
+    lookahead_range: tuple[float, float] = (0.08, 0.30)
+    """Distance ahead of the wheel contact at which the operator presses (m)."""
+    hold_s: float = 0.3
+    recent_s: float = 0.6
+    auto_prob: float = 0.9
+    random_press_prob: float = 0.4
+    random_press_s: tuple[float, float] = (0.2, 0.5)
+
+
+# -- rewards --------------------------------------------------------------------------
+def wheel_lift_on_trigger(env: ManagerBasedRLEnv, command_name: str = "climb", sensor_name: str = "height_scanner", max_clearance: float = 0.05) -> torch.Tensor:
+    """Sum over pressed sides of tire clearance above the ground under it, normalized to [0, 1] at ``max_clearance``."""
+    trig = env.command_manager.get_command(command_name)
+    dx, dy, hit_z, wheel_z = _wheel_scan(env, sensor_name)
+    clearance = (wheel_z - WHEEL_RADIUS_M - _ground_under(dx, dy, hit_z)).clamp(0.0, max_clearance) / max_clearance
+    return (trig * clearance).sum(dim=1)
+
+
+def _free(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    return 1.0 - env.command_manager.get_term(command_name).recently_pressed
+
+
+def mirror_leg_l2_gated(env: ManagerBasedRLEnv, command_name: str = "climb") -> torch.Tensor:
+    return cr.mirror_leg_l2(env) * _free(env, command_name)
+
+
+def joint_deviation_l1_gated(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, command_name: str = "climb") -> torch.Tensor:
+    return mdp.joint_deviation_l1(env, asset_cfg) * _free(env, command_name)
+
+
+def lin_vel_z_l2_gated(env: ManagerBasedRLEnv, command_name: str = "climb") -> torch.Tensor:
+    return mdp.lin_vel_z_l2(env) * _free(env, command_name)
