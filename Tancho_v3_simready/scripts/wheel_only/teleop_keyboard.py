@@ -83,8 +83,9 @@ class WasdKeyboard:
         return True
 
     def command(self) -> tuple[float, float]:
-        fwd = sum(MOVE_KEYS[k][0] for k in self.held)
-        turn = sum(MOVE_KEYS[k][1] for k in self.held)
+        moves = [MOVE_KEYS[k] for k in self.held if k in MOVE_KEYS]
+        fwd = sum(m[0] for m in moves)
+        turn = sum(m[1] for m in moves)
         return fwd * self.vx_max, turn * self.wz_max
 
     def triggers(self) -> tuple[float, float]:
