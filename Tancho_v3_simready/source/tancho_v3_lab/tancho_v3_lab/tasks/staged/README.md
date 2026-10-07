@@ -14,7 +14,7 @@
 | 6B | `TanchoV3-Climb-v0` / `TanchoV3-ClimbFree-v0` | 同上 | 同上 | 按鍵上台階（固定連招 / 全權重）——**未完成** |
 | 6A v2 | `TanchoV3-ClimbHop-v0`（commit 3f4fab9 起） | 同 6A | 同上，按鍵含連按、雙鍵時間差 | 快速連跳/左右交替不倒（release `releases/tancho_v3_hop_v2`） |
 | 6A-free | `TanchoV3-ClimbHopFree-v0` | 同上 | 同上 | 參考動作降到 0——**失敗**：policy 不抬腳 |
-| 7 | `TanchoV3-Recover-v0` / `TanchoV3-RecoverWide-v0` | 同上 | 同上 | 從傾斜/倒地站起來（實驗中） |
+| 7 | `TanchoV3-Recover-v0` / `TanchoV3-RecoverWide-v0` | 同上 | 同上 | 從傾斜/倒地站起來——**未成功**：只救回 15° 內的傾斜 |
 
 階段 4/5 用 `terrain.py` 的課程：撐到 time-out 且速度追蹤 > 60% 升級，跌倒降級。
 驗收：`evaluate_walk.py --task TanchoV3-Walk-Rough-Play-v0`、`evaluate_step.py --direction up|down`。
