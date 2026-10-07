@@ -380,3 +380,72 @@ class TanchoV3ClimbHopFreeEnvCfg(TanchoV3ClimbHopEnvCfg):
 @configclass
 class TanchoV3ClimbHopFreePlayEnvCfg(TanchoV3ClimbHopPlayEnvCfg):
     pass
+
+
+# -- stage 7: fall recovery ----------------------------------------------------------
+from . import recover  # noqa: E402
+from .rewards import RewTerm  # noqa: E402
+
+
+@configclass
+class RecoverEventsCfg(EventsCfg):
+    # After reset_base / reset_joints: pitch by up to the curriculum's tilt and drop.
+    reset_fallen = EventTerm(func=recover.reset_fallen, mode="reset")
+
+
+@configclass
+class RecoverCurriculumCfg:
+    max_start_tilt = CurrTerm(func=recover.recover_curriculum)
+    upright_share = CurrTerm(func=recover.recover_success)
+
+
+@configclass
+class RecoverRewardsCfg(ClimbRewardsCfg):
+    # Being up (tilt < 15 deg, root at > 85% of standing height): +3 per second.
+    stand_up = RewTerm(func=recover.is_up, weight=3.0)
+    # Lying on the body / legs costs 0.5 per second per body.
+    body_ground = RewTerm(
+        func=recover.body_ground_contact,
+        weight=-0.5,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=["base_link_root", "thigh_.*", "calf_.*"])},
+    )
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Getting up is asymmetric and far from the nominal pose: light posture costs.
+        self.mirror.weight = -2.0
+        self.leg_deviation.weight = -0.1
+        self.wheel_lift.weight = 0.0
+        self.leg_reference.weight = 0.0
+        self.climb_progress.weight = 0.0
+
+
+@configclass
+class TanchoV3RecoverEnvCfg(TanchoV3ClimbHopEnvCfg):
+    """Get up from a lean / a fall.  From a ClimbHop(Free) checkpoint (--keep_obs_norm)."""
+
+    events: RecoverEventsCfg = RecoverEventsCfg()
+    rewards: RecoverRewardsCfg = RecoverRewardsCfg()
+    curriculum: RecoverCurriculumCfg = RecoverCurriculumCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.episode_length_s = 10.0
+        # Only the time-out ends an episode.
+        self.terminations.tilt = None
+        self.terminations.body_contact = None
+        # Mostly standing still; no trigger presses, no reference injection.
+        self.commands.base_velocity.rel_standing_envs = 0.5
+        self.commands.climb.random_press_prob = 0.0
+        self.commands.climb.burst_prob = 0.0
+        self.actions.leg_pos.guidance_scale = 0.0
+        self.events.push_robot = None
+
+
+@configclass
+class TanchoV3RecoverPlayEnvCfg(TanchoV3RecoverEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        _to_play(self)
+        self.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, "flat", 0.0, size=16.0), max_init_level=None)
+        self.events.reset_fallen = None  # scripts set the start pose
