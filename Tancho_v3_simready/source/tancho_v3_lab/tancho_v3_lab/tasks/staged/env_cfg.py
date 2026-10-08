@@ -602,3 +602,59 @@ class TanchoV3ClimbStepDRv2PlayEnvCfg(TanchoV3ClimbStepDRPlayEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.actions.leg_pos.ref_style = "v2"
+
+
+# -- stage 8: stairs, one leg at a time (plan 2026-10-09) ------------------------------
+from .climb import stall_on_command  # noqa: E402
+from .scene import StairSceneCfg  # noqa: E402
+
+STAIR_LEG_ACTION_SCALE_RAD = 1.0  # URDF thigh +/-1.57, calf 0..3: nominal +/-1.0 stays inside
+
+
+@configclass
+class StairEventsCfg(StepDREventsCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.physics_material.params["static_friction_range"] = (0.4, 1.2)
+        self.physics_material.params["dynamic_friction_range"] = (0.4, 1.2)
+        self.base_com.params["com_range"] = {"x": (-0.02, 0.02), "y": (-0.02, 0.02), "z": (-0.02, 0.02)}
+
+
+@configclass
+class TanchoV3StairEnvCfg(TanchoV3ClimbStepDREnvCfg):
+    """Steps up one leg at a time (CTBC / Ascento): the tire that touches an edge
+    triggers its side (contact trigger), the v3 reference lifts it +55 mm, swings it
+    +50 mm forward and plants it at +30 mm, then the other side follows.  Legs
+    nominal +/-1.0 rad; a stall penalty keeps "drive slowly and stop at the edge"
+    (B1 / StepDR) from paying.  From step_dr rescaled to the 1.0 rad leg scale."""
+
+    scene: StairSceneCfg = StairSceneCfg(num_envs=4096, env_spacing=2.0)
+    events: StairEventsCfg = StairEventsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.climb.sensor_name = "edge_scanner"
+        self.commands.climb.scan_ahead_m = 0.11
+        self.actions.leg_pos.scale = STAIR_LEG_ACTION_SCALE_RAD
+        self.actions.leg_pos.ref_style = "v3"
+        self.rewards.leg_reference.params = {"ref_style": "v3"}
+        c = self.commands.climb
+        c.touch_gap_m = 0.015
+        c.sequential = True
+        self.commands.base_velocity.ranges.lin_vel_x = (0.2, 0.5)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.3, 0.3)
+        self.rewards.stall = RewTerm(func=stall_on_command, weight=-1.0)
+
+
+@configclass
+class TanchoV3StairPlayEnvCfg(TanchoV3ClimbStepDRPlayEnvCfg):
+    scene: StairSceneCfg = StairSceneCfg(num_envs=1, env_spacing=2.0)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.climb.sensor_name = "edge_scanner"
+        self.commands.climb.scan_ahead_m = 0.11
+        self.actions.leg_pos.scale = STAIR_LEG_ACTION_SCALE_RAD
+        self.actions.leg_pos.ref_style = "v3"
+        self.commands.climb.touch_gap_m = 0.015
+        self.commands.climb.sequential = True

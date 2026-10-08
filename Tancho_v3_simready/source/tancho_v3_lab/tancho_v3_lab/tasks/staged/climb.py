@@ -107,7 +107,36 @@ def reference_leg_offsets_v2(phase: torch.Tensor) -> torch.Tensor:
     return off.reshape(-1, 4)
 
 
+# -- reference v3 (2026-10-09): one leg steps up onto a 3 cm step ---------------------
+# Keyframes (t s, dthigh, dcalf) from URDF IK in the leg plane (x forward, z up, axle
+# relative to nominal): lift to +55 mm, swing forward +50 mm, plant at +30 mm (the step
+# top), back to nominal (that push carries the body up).  Needs legs nominal +/-0.82 rad.
+# A hop (both sides started together) keeps the v1 profile.
+REF3_KEYS = ((0.0, 0.0, 0.0), (0.10, -0.32, 0.78), (0.20, -0.04, 0.815), (0.28, 0.045, 0.51), (0.40, 0.0, 0.0))
+
+
+def _keyframes(p: torch.Tensor, keys) -> torch.Tensor:
+    """(N, 2) phase -> (N, 2, 2) linear interpolation of (dthigh, dcalf); 0 outside."""
+    out = torch.zeros(*p.shape, 2, device=p.device)
+    for (t0, a0, b0), (t1, a1, b1) in zip(keys[:-1], keys[1:]):
+        w = ((p - t0) / (t1 - t0)).clamp(0.0, 1.0).unsqueeze(-1)
+        seg = torch.tensor([a0, b0], device=p.device) * (1 - w) + torch.tensor([a1, b1], device=p.device) * w
+        inside = ((p >= t0) & (p < t1)).unsqueeze(-1)
+        out = torch.where(inside, seg, out)
+    return out
+
+
+def reference_leg_offsets_v3(phase: torch.Tensor) -> torch.Tensor:
+    step = _keyframes(phase, REF3_KEYS)
+    hop = reference_leg_offsets(phase).reshape(-1, 2, 2)
+    active = phase < REF_T_END
+    both = active.all(dim=1, keepdim=True) & ((phase[:, 0] - phase[:, 1]).abs() < 0.03).unsqueeze(1)
+    return torch.where(both.unsqueeze(-1), hop, step).reshape(-1, 4)
+
+
 def reference_offsets(phase: torch.Tensor, style: str) -> torch.Tensor:
+    if style == "v3":
+        return reference_leg_offsets_v3(phase)
     return reference_leg_offsets_v2(phase) if style == "v2" else reference_leg_offsets(phase)
 
 
@@ -228,7 +257,19 @@ class ClimbTriggerCommand(CommandTerm):
         vx = self._env.scene["robot"].data.root_lin_vel_b[:, 0].clamp(min=0.05)
         ttc = gap / vx.unsqueeze(1)
         vx_cmd = self._env.command_manager.get_command(self.cfg.velocity_command_name)[:, 0]
-        need = (edge_dx < 9.0) & (ttc < self.lookahead.unsqueeze(1)) & (vx_cmd > 0.05).unsqueeze(1) & self.attentive.unsqueeze(1)
+        if self.cfg.touch_gap_m is not None:
+            # Contact trigger (CTBC): press the side whose tire is touching the edge.
+            when = gap < self.cfg.touch_gap_m
+        else:
+            when = ttc < self.lookahead.unsqueeze(1)
+        need = (edge_dx < 9.0) & when & (vx_cmd > 0.05).unsqueeze(1) & self.attentive.unsqueeze(1)
+        if self.cfg.sequential:
+            # One leg at a time (Ascento / CTBC): of two touching tires the closer one goes
+            # first; a side waits until the other side's step is planted.
+            closer = torch.stack([gap[:, 0] <= gap[:, 1], gap[:, 1] < gap[:, 0]], dim=1)
+            need = torch.where(need.all(dim=1, keepdim=True), need & closer, need)
+            other_busy = self.phase.flip(1) < self.cfg.sequential_wait_s
+            need = need & ~other_busy
         # One press per edge: hold for hold_s, then a cooldown before the same side can
         # fire again (otherwise a robot parked at an edge keeps the trigger held and
         # could farm the lift rewards).
@@ -304,6 +345,11 @@ class ClimbTriggerCommandCfg(CommandTermCfg):
     """After a random press is released, chance of another one ``burst_gap_s`` later (chains)."""
     burst_gap_s: tuple[float, float] = (0.1, 0.8)
     both_skew_s: float = 0.0
+    touch_gap_m: float | None = None
+    """Contact trigger: press a side when its tire is within this of an edge (None: time-to-contact)."""
+    sequential: bool = False
+    """One side at a time: the closer tire first, the other after ``sequential_wait_s`` of that step."""
+    sequential_wait_s: float = 0.3
     """A "both" random press starts one side up to this much later (s)."""
 
 
@@ -513,3 +559,10 @@ class JointVelocityActionDelayedCfg(mdp.JointVelocityActionCfg):
     class_type: type = JointVelocityActionDelayed
     min_delay_substeps: int = 0
     max_delay_substeps: int = 4
+
+
+def stall_on_command(env: ManagerBasedRLEnv, command_name: str = "base_velocity", min_cmd: float = 0.15, max_speed: float = 0.05) -> torch.Tensor:
+    """1 while commanded forward (> ``min_cmd``) but moving slower than ``max_speed`` (Ascento's stall penalty)."""
+    cmd = env.command_manager.get_command(command_name)[:, 0]
+    vx = env.scene["robot"].data.root_lin_vel_b[:, 0]
+    return ((cmd > min_cmd) & (vx < max_speed)).float()

@@ -197,3 +197,19 @@ class ClimbSceneCfg(FullSceneCfg):
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
+
+
+@configclass
+class StairSceneCfg(ClimbSceneCfg):
+    # Fine scan just ahead of the tires for the simulated operator's contact trigger (the
+    # 5 cm grid above overestimates the distance to an edge by up to 5 cm).  Never an
+    # actor or critic input.  1 cm grid from 1 cm behind to 11 cm ahead of the root,
+    # y = -0.12..0.12 m (tires at y = +/-0.115).
+    edge_scanner = RayCasterCfg(
+        prim_path="/World/envs/env_.*/Robot/base_link_root",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.05, 0.0, 20.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.01, size=[0.12, 0.24]),
+        debug_vis=False,
+        mesh_prim_paths=["/World/ground"],
+    )

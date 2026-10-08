@@ -32,7 +32,7 @@ parser.add_argument("--duration", type=float, default=6.0)
 parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("--only", type=str, default=None, help="'vx,lookahead': a single env (for --video)")
 parser.add_argument("--video", type=Path, default=None, help="record an mp4 of env 0 into this folder")
-parser.add_argument("--ref-style", choices=["v1", "v2"], default="v1", help="reference lift: v1, or v2 (stance push, crouch/push/tuck hop)")
+parser.add_argument("--ref-style", choices=["v1", "v2", "v3"], default=None, help="reference lift: v1, or v2 (stance push, crouch/push/tuck hop)")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 if args.video:
@@ -48,11 +48,13 @@ from tancho_v3_lab.tasks.staged.terrain import CLIMB_GENERATOR, make_terrain, pl
 
 SPEEDS = [0.3, 0.4, 0.5, 0.6]
 LOOKAHEAD = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35]
+YAW_DEG = [-20.0, -10.0, -5.0, 0.0, 5.0, 10.0, 20.0, 30.0]
 
 
 @torch.inference_mode()
 def main() -> int:
     grid = list(itertools.product(SPEEDS, LOOKAHEAD))
+    contact = False
     if args.only:
         v, la = (float(x) for x in args.only.split(","))
         grid = [(v, la)]
@@ -72,7 +74,14 @@ def main() -> int:
     gen.sub_terrains["step_up"].step_height_range = (args.step_height, args.step_height)
     cfg.scene.terrain = make_terrain(gen, max_init_level=None)
     cfg.actions.leg_pos.guidance_scale = args.guidance
-    cfg.actions.leg_pos.ref_style = args.ref_style
+    if args.ref_style is not None:
+        cfg.actions.leg_pos.ref_style = args.ref_style
+    contact = getattr(cfg.commands.climb, "touch_gap_m", None) is not None
+    if contact and not args.only:
+        # Contact-triggered tasks: the second axis is the approach angle (deg), not the press timing.
+        grid = list(itertools.product(SPEEDS, YAW_DEG))
+        n = len(grid)
+        cfg.scene.num_envs = n
     env = gym.make(args.task, cfg=cfg, render_mode="rgb_array" if args.video else None)
     if args.video:
         env = gym.wrappers.RecordVideo(
@@ -92,6 +101,14 @@ def main() -> int:
     cmd = torch.tensor([[v, 0.0, 0.0] for v, _ in grid], device=dev)
     look = torch.tensor([la for _, la in grid], device=dev)
     obs, _ = env.reset()
+    if contact:
+        from isaaclab.utils.math import quat_from_euler_xyz, quat_mul
+
+        yaw = torch.tensor([math.radians(a if not args.only else 0.0) for _, a in grid], device=dev)
+        st = robot.data.root_state_w.clone()
+        st[:, 3:7] = quat_mul(quat_from_euler_xyz(torch.zeros_like(yaw), torch.zeros_like(yaw), yaw), st[:, 3:7])
+        robot.write_root_state_to_sim(st)
+        obs = core.observation_manager.compute()
     axle0 = robot.data.body_pos_w[:, wheel_ids, 2].mean(dim=1)
     fell_at = torch.full((n,), -1.0, device=dev)
     hist = []
@@ -100,7 +117,8 @@ def main() -> int:
     steps = round(args.duration / dt)
     for k in range(steps):
         vel.vel_command_b[:] = cmd
-        climb.lookahead[:] = look
+        if not contact:
+            climb.lookahead[:] = look
         climb.attentive[:] = True
         obs, _, term, _, _ = env.step(policy(obs["policy"]))
         alive = fell_at < 0
@@ -134,10 +152,11 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps({"summary": summary, "rows": rows}, indent=1) + "\n")
     print(json.dumps(summary, indent=1))
-    print("vx \\ lookahead " + " ".join(f"{la:5.2f}" for la in LOOKAHEAD))
+    axis = YAW_DEG if contact else LOOKAHEAD
+    print(("vx \\ yaw_deg   " if contact else "vx \\ lookahead ") + " ".join(f"{la:5.1f}" for la in axis))
     for v in SPEEDS:
         cells = []
-        for la in LOOKAHEAD:
+        for la in axis:
             r = next((x for x in rows if x["vx"] == v and x["lookahead_s"] == la), None)
             if r is None:
                 continue

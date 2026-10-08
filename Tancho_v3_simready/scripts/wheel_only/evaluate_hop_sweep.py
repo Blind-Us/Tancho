@@ -33,7 +33,7 @@ parser.add_argument("--min-clear", type=float, default=0.02)
 parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("--delay-substeps", type=int, default=0, help="fixed control latency, 5 ms physics substeps (0-4)")
 parser.add_argument("--gain-scale", type=float, default=1.0, help="leg Kp/Kd and wheel Kd x this")
-parser.add_argument("--ref-style", choices=["v1", "v2"], default="v1", help="reference lift: v1, or v2 (stance push, crouch/push/tuck hop)")
+parser.add_argument("--ref-style", choices=["v1", "v2", "v3"], default=None, help="reference lift: v1, or v2 (stance push, crouch/push/tuck hop)")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 simulation_app = AppLauncher(args).app
@@ -92,7 +92,8 @@ def main() -> int:
         cfg.commands.climb.burst_prob = 0.0
         cfg.commands.climb.both_skew_s = 0.0
     cfg.actions.leg_pos.guidance_scale = args.guidance
-    cfg.actions.leg_pos.ref_style = args.ref_style
+    if args.ref_style is not None:
+        cfg.actions.leg_pos.ref_style = args.ref_style
     if args.delay_substeps > 0:
         from tancho_v3_lab.tasks.staged.climb import ClimbLegActionDelayedCfg, JointVelocityActionDelayedCfg
 
@@ -100,7 +101,7 @@ def main() -> int:
         d = {"min_delay_substeps": args.delay_substeps, "max_delay_substeps": args.delay_substeps}
         cfg.actions.leg_pos = ClimbLegActionDelayedCfg(
             asset_name="robot", joint_names=leg.joint_names, scale=leg.scale, use_default_offset=True,
-            preserve_order=True, guidance_scale=args.guidance, ref_style=args.ref_style, **d)
+            preserve_order=True, guidance_scale=args.guidance, ref_style=args.ref_style or cfg.actions.leg_pos.ref_style, **d)
         cfg.actions.wheel_vel = JointVelocityActionDelayedCfg(
             asset_name="robot", joint_names=wheel.joint_names, scale=wheel.scale, use_default_offset=True,
             preserve_order=True, **d)

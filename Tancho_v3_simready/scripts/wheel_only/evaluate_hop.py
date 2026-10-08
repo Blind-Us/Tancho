@@ -36,7 +36,7 @@ parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("--terrain", choices=["flat", "rough"], default="flat", help="rough: one tile of the HOP rough terrain at --difficulty (1.0 = 2 cm peak-to-peak); clearance is then relative to the start ground")
 parser.add_argument("--difficulty", type=float, default=1.0)
 parser.add_argument("--video", type=Path, default=None, help="record an mp4 into this folder (needs --enable_cameras)")
-parser.add_argument("--ref-style", choices=["v1", "v2"], default="v1", help="reference lift: v1, or v2 (stance push, crouch/push/tuck hop)")
+parser.add_argument("--ref-style", choices=["v1", "v2", "v3"], default=None, help="reference lift: v1, or v2 (stance push, crouch/push/tuck hop)")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 if args.video:
@@ -67,7 +67,8 @@ def main() -> int:
     cfg.commands.climb.random_press_prob = 0.0
     cfg.commands.climb.auto_prob = 0.0
     cfg.actions.leg_pos.guidance_scale = args.guidance
-    cfg.actions.leg_pos.ref_style = args.ref_style
+    if args.ref_style is not None:
+        cfg.actions.leg_pos.ref_style = args.ref_style
     if args.terrain == "rough":
         from tancho_v3_lab.tasks.staged.terrain import HOP_GENERATOR, make_terrain, play_generator
 
