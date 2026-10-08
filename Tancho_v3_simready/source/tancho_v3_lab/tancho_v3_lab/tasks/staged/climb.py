@@ -68,6 +68,49 @@ def reference_leg_offsets(phase: torch.Tensor) -> torch.Tensor:
     return off.reshape(-1, 4)
 
 
+# -- reference v2 (user, 2026-10-08): "one leg lifts, the other pushes"; a real hop --
+# Single press (the other side idle): the pressed leg tucks as before and the other
+# (stance) leg extends, raising that side of the body.  Both sides started together
+# (a hop): crouch, push hard, tuck, return - the body leaves with upward speed
+# instead of the wheels only being pulled up.  Same 0.4 s length (press queue rule).
+REF2_CROUCH_END = 0.10
+REF2_PUSH_END = 0.18
+REF2_TUCK_END = 0.30
+REF2_SYNC_S = 0.07  # both phases within this: a hop
+
+
+def _ramp_back(p: torch.Tensor, t0: float, t1: float) -> torch.Tensor:
+    return (1.0 - (p - t0) / (t1 - t0)).clamp(0.0, 1.0)
+
+
+def reference_leg_offsets_v2(phase: torch.Tensor) -> torch.Tensor:
+    """(N, 2) phases -> (N, 4) offsets thigh_L, calf_L, thigh_R, calf_R."""
+    ext = torch.tensor(REF_EXTEND, device=phase.device)
+    tuck = torch.tensor(REF_TUCK, device=phase.device)
+    active = phase < REF_T_END  # (N, 2)
+    p = phase.unsqueeze(-1)  # (N, 2, 1)
+    # Single lift: tuck by 0.02 s, hold to 0.22 s, return by 0.40 s (no push on the swing leg).
+    swing = torch.where(p < REF_T_TUCK_END, tuck, tuck * _ramp_back(p, REF_T_TUCK_END, REF_T_END))
+    # Hop: crouch (half tuck), push (extend), tuck, return.
+    hop = torch.where(
+        p < REF2_CROUCH_END, 0.5 * tuck,
+        torch.where(p < REF2_PUSH_END, ext, torch.where(p < REF2_TUCK_END, tuck, tuck * _ramp_back(p, REF2_TUCK_END, REF_T_END))),
+    )
+    both = active.all(dim=1, keepdim=True) & ((phase[:, 0] - phase[:, 1]).abs() < REF2_SYNC_S).unsqueeze(1)  # (N, 1)
+    own = torch.where(both.unsqueeze(-1), hop, swing)
+    own = torch.where(active.unsqueeze(-1), own, torch.zeros_like(own))
+    # Stance push: the other side extends while this side lifts alone.
+    other = phase.flip(1).unsqueeze(-1)  # (N, 2, 1) the other side's phase
+    other_alone = (phase.flip(1) < REF_T_END) & ~active & ~both
+    push = ext * torch.where(other < REF_T_TUCK_END, torch.ones_like(other), _ramp_back(other, REF_T_TUCK_END, REF_T_END))
+    off = torch.where(other_alone.unsqueeze(-1), push, own)
+    return off.reshape(-1, 4)
+
+
+def reference_offsets(phase: torch.Tensor, style: str) -> torch.Tensor:
+    return reference_leg_offsets_v2(phase) if style == "v2" else reference_leg_offsets(phase)
+
+
 def _wheel_scan(env: ManagerBasedRLEnv, sensor_name: str, robot_name: str = "robot"):
     """Per wheel: local (yaw-frame) ray offsets from the wheel and ground heights.
 
@@ -279,7 +322,7 @@ class ClimbLegAction(mdp.JointPositionAction):
         scale = getattr(self._env, "_climb_ref_scale", self.cfg.guidance_scale)
         if scale > 0.0:
             term = self._env.command_manager.get_term(self.cfg.command_name)
-            self._processed_actions += scale * reference_leg_offsets(term.phase)
+            self._processed_actions += scale * reference_offsets(term.phase, self.cfg.ref_style)
 
 
 @configclass
@@ -287,6 +330,8 @@ class ClimbLegActionCfg(mdp.JointPositionActionCfg):
     class_type: type = ClimbLegAction
     command_name: str = "climb"
     guidance_scale: float = 1.0
+    ref_style: str = "v1"
+    """v1: the lift as trained until 2026-10-08; v2: stance-leg push + crouch/push/tuck hop."""
 
 
 def climb_phase(env: ManagerBasedRLEnv, command_name: str = "climb") -> torch.Tensor:
@@ -301,15 +346,17 @@ def reference_guidance(env: ManagerBasedRLEnv, env_ids, hold_iters: int = 300, a
 
 
 # -- rewards --------------------------------------------------------------------------
-def leg_reference_tracking(env: ManagerBasedRLEnv, command_name: str = "climb", std: float = 0.25) -> torch.Tensor:
+def leg_reference_tracking(env: ManagerBasedRLEnv, command_name: str = "climb", std: float = 0.25, ref_style: str = "v1") -> torch.Tensor:
     """While a side's reference is running: exp(-|q - q_ref|^2 / std^2) over that leg's two joints."""
     term = env.command_manager.get_term(command_name)
     robot = env.scene["robot"]
     if not hasattr(env, "_climb_leg_ids"):
         env._climb_leg_ids = robot.find_joints(["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"], preserve_order=True)[0]
     q = robot.data.joint_pos[:, env._climb_leg_ids] - robot.data.default_joint_pos[:, env._climb_leg_ids]
-    err = (q - reference_leg_offsets(term.phase)).square().reshape(-1, 2, 2).sum(-1)
+    err = (q - reference_offsets(term.phase, ref_style)).square().reshape(-1, 2, 2).sum(-1)
     active = (term.phase < REF_T_END).float()
+    if ref_style == "v2":  # the stance leg follows its push too
+        active = torch.maximum(active, active.flip(1))
     return (active * torch.exp(-err / std**2)).sum(dim=1)
 
 def wheel_lift_on_trigger(env: ManagerBasedRLEnv, command_name: str = "climb", sensor_name: str = "height_scanner", max_clearance: float = 0.05) -> torch.Tensor:

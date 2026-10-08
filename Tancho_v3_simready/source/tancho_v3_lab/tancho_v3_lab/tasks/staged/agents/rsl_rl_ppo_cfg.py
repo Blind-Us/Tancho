@@ -115,3 +115,10 @@ class TanchoV3ClimbStepDRPPORunnerCfg(TanchoV3ClimbPPORunnerCfg):
     # Run 1 from ClimbHopDR, run 2 from run 1 model_600 (--keep_obs_norm).
     max_iterations = 700
     experiment_name = "tancho_v3_climb_step_dr"
+
+
+@configclass
+class TanchoV3ClimbStepDRv2PPORunnerCfg(TanchoV3ClimbStepDRPPORunnerCfg):
+    # From step_dr (ClimbStepDR run 2) with reference v2 (--keep_obs_norm).
+    max_iterations = 600
+    experiment_name = "tancho_v3_climb_step_dr_v2"

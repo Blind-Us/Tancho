@@ -581,3 +581,24 @@ class TanchoV3ClimbStepDRPlayEnvCfg(TanchoV3ClimbPlayEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.commands.climb.rise_threshold = 0.008
+
+
+# -- stage 6B DR, reference v2 (user: "one leg lifts, the other pushes"; a real hop) --
+@configclass
+class TanchoV3ClimbStepDRv2EnvCfg(TanchoV3ClimbStepDREnvCfg):
+    """ClimbStepDR with ``climb.reference_leg_offsets_v2`` injected and imitated.
+    Without retraining, step_dr + v2 lifted the pressed wheel 39 mm (v1: 40) while the
+    stance push bounced the other wheel 25 mm up, and the crouch/push/tuck hop cleared
+    only 9-10 mm (v1: 34-38) and fell at 8.5 s."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.ref_style = "v2"
+        self.rewards.leg_reference.params = {"ref_style": "v2"}
+
+
+@configclass
+class TanchoV3ClimbStepDRv2PlayEnvCfg(TanchoV3ClimbStepDRPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.ref_style = "v2"

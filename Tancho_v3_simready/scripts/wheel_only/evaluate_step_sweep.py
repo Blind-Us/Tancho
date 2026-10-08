@@ -32,6 +32,7 @@ parser.add_argument("--duration", type=float, default=6.0)
 parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("--only", type=str, default=None, help="'vx,lookahead': a single env (for --video)")
 parser.add_argument("--video", type=Path, default=None, help="record an mp4 of env 0 into this folder")
+parser.add_argument("--ref-style", choices=["v1", "v2"], default="v1", help="reference lift: v1, or v2 (stance push, crouch/push/tuck hop)")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 if args.video:
@@ -71,6 +72,7 @@ def main() -> int:
     gen.sub_terrains["step_up"].step_height_range = (args.step_height, args.step_height)
     cfg.scene.terrain = make_terrain(gen, max_init_level=None)
     cfg.actions.leg_pos.guidance_scale = args.guidance
+    cfg.actions.leg_pos.ref_style = args.ref_style
     env = gym.make(args.task, cfg=cfg, render_mode="rgb_array" if args.video else None)
     if args.video:
         env = gym.wrappers.RecordVideo(
