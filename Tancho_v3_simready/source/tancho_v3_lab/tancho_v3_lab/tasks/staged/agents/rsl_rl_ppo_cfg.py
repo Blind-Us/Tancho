@@ -108,3 +108,10 @@ class TanchoV3ClimbHopDRPPORunnerCfg(TanchoV3ClimbHopPPORunnerCfg):
     # From ClimbHop v2 (--keep_obs_norm).
     max_iterations = 800
     experiment_name = "tancho_v3_climb_hop_dr"
+
+
+@configclass
+class TanchoV3ClimbStepDRPPORunnerCfg(TanchoV3ClimbPPORunnerCfg):
+    # From ClimbHopDR (--keep_obs_norm).
+    max_iterations = 1200
+    experiment_name = "tancho_v3_climb_step_dr"

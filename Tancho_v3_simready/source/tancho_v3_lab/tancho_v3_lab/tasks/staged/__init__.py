@@ -20,6 +20,7 @@ _STAGES = {
     "TanchoV3-ClimbFree": ("TanchoV3ClimbFree", "TanchoV3ClimbFreePPORunnerCfg"),
     "TanchoV3-ClimbHopFree": ("TanchoV3ClimbHopFree", "TanchoV3ClimbHopFreePPORunnerCfg"),
     "TanchoV3-ClimbHopDR": ("TanchoV3ClimbHopDR", "TanchoV3ClimbHopDRPPORunnerCfg"),
+    "TanchoV3-ClimbStepDR": ("TanchoV3ClimbStepDR", "TanchoV3ClimbStepDRPPORunnerCfg"),
     "TanchoV3-Recover": ("TanchoV3Recover", "TanchoV3RecoverPPORunnerCfg"),
     "TanchoV3-RecoverWide": ("TanchoV3RecoverWide", "TanchoV3RecoverWidePPORunnerCfg"),
 }

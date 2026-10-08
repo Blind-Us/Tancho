@@ -536,3 +536,47 @@ class TanchoV3ClimbHopDREnvCfg(TanchoV3ClimbHopEnvCfg):
 @configclass
 class TanchoV3ClimbHopDRPlayEnvCfg(TanchoV3ClimbHopPlayEnvCfg):
     pass
+
+
+# -- stage 6B DR: steps up with the timed hop, sim-to-real randomization on --------------
+@configclass
+class StepDREventsCfg(HopDREventsCfg):
+    pass
+
+
+@configclass
+class TanchoV3ClimbStepDREnvCfg(TanchoV3ClimbEnvCfg):
+    """Climb B1 again, from the ClimbHopDR checkpoint, with the DR events / latency.
+
+    A timing sweep (``evaluate_step_sweep.py``) with ClimbHopDR showed the timed hop
+    lifts the axle 4.6 cm and lands on 3 cm steps, then falls within 0.2 s: height is
+    there, the landing balance is not.  B1 runs 1-3 learned to drive slowly and stop
+    short of every edge instead; here falling is cheap and height pays more."""
+
+    events: StepDREventsCfg = StepDREventsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos = ClimbLegActionDelayedCfg(
+            asset_name="robot", joint_names=LEG_JOINTS, scale=CLIMB_LEG_ACTION_SCALE_RAD,
+            use_default_offset=True, preserve_order=True,
+        )
+        self.actions.wheel_vel = JointVelocityActionDelayedCfg(
+            asset_name="robot", joint_names=WHEEL_JOINTS, scale=WHEEL_RATED_SPEED_RAD_S,
+            use_default_offset=True, preserve_order=True,
+        )
+        # Best timing in the sweep: press 0.15-0.25 s before the tire reaches the edge.
+        self.commands.climb.lookahead_range = (0.15, 0.25)
+        # Press for 1 cm steps too (threshold was 1.2 cm: the 1 cm level never pressed).
+        self.commands.climb.rise_threshold = 0.008
+        self.commands.climb.burst_prob = 0.0
+        # A fall at an edge costs 0.4 instead of 4; a 3 cm step pays 9 instead of 3.
+        self.rewards.termination_penalty.weight = -20.0
+        self.rewards.climb_progress.weight = 300.0
+
+
+@configclass
+class TanchoV3ClimbStepDRPlayEnvCfg(TanchoV3ClimbPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.climb.rise_threshold = 0.008
