@@ -36,6 +36,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--task", default="TanchoV3-Walk-Flat-Play-v0")
 parser.add_argument("--checkpoint", type=Path, required=True, help="exported TorchScript policy.pt")
 parser.add_argument("--terrain", choices=("flat", "rough", "step_up", "step_down"), default=None, help="Climb tasks: terrain tile")
+parser.add_argument("--step-height", type=float, default=None, help="step_up / step_down tiles: riser height in m (default 3 cm)")
 parser.add_argument("--guidance", type=float, default=1.0, help="Climb tasks: reference-lift injection scale")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
@@ -111,10 +112,10 @@ def main() -> None:
         cfg.commands.climb.random_press_prob = 0.0
         cfg.actions.leg_pos.guidance_scale = args.guidance
         if args.terrain:
-            cfg.scene.terrain = make_terrain(
-                play_generator(CLIMB_GENERATOR, args.terrain, 0.0 if args.terrain == "flat" else 1.0, size=16.0),
-                max_init_level=None,
-            )
+            gen = play_generator(CLIMB_GENERATOR, args.terrain, 0.0 if args.terrain == "flat" else 1.0, size=16.0)
+            if args.step_height is not None and args.terrain.startswith("step"):
+                gen.sub_terrains[args.terrain].step_height_range = (args.step_height, args.step_height)
+            cfg.scene.terrain = make_terrain(gen, max_init_level=None)
     env = gym.make(args.task, cfg=cfg)
     core = env.unwrapped
     command = core.command_manager.get_term("base_velocity")
