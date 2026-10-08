@@ -1,0 +1,5 @@
+commit 61eb369470a8e880e3e5ec9061c6ec2efbb27768
+dirty_task_files no
+
+init_checkpoint /home/azul/Tancho/Tancho_v3_simready/logs/rsl_rl/tancho_v3_climb_hop/2026-10-08_03-34-23_3f4fab9/model_final.pt
+keep_obs_norm True

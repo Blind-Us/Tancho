@@ -30,8 +30,12 @@ parser.add_argument("--guidance", type=float, default=1.0)
 parser.add_argument("--step-height", type=float, default=0.03)
 parser.add_argument("--duration", type=float, default=6.0)
 parser.add_argument("--output", type=Path, required=True)
+parser.add_argument("--only", type=str, default=None, help="'vx,lookahead': a single env (for --video)")
+parser.add_argument("--video", type=Path, default=None, help="record an mp4 of env 0 into this folder")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
+if args.video:
+    args.enable_cameras = True
 simulation_app = AppLauncher(args).app
 
 import gymnasium as gym  # noqa: E402
@@ -48,6 +52,9 @@ LOOKAHEAD = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35]
 @torch.inference_mode()
 def main() -> int:
     grid = list(itertools.product(SPEEDS, LOOKAHEAD))
+    if args.only:
+        v, la = (float(x) for x in args.only.split(","))
+        grid = [(v, la)]
     n = len(grid)
     cfg = parse_env_cfg(args.task, device=args.device, num_envs=n, use_fabric=True)
     cfg.episode_length_s = args.duration + 5.0
@@ -64,7 +71,13 @@ def main() -> int:
     gen.sub_terrains["step_up"].step_height_range = (args.step_height, args.step_height)
     cfg.scene.terrain = make_terrain(gen, max_init_level=None)
     cfg.actions.leg_pos.guidance_scale = args.guidance
-    env = gym.make(args.task, cfg=cfg)
+    env = gym.make(args.task, cfg=cfg, render_mode="rgb_array" if args.video else None)
+    if args.video:
+        env = gym.wrappers.RecordVideo(
+            env, video_folder=str(args.video), step_trigger=lambda step: step == 0,
+            video_length=round(args.duration / (cfg.sim.dt * cfg.decimation)) - 2,
+            name_prefix=args.output.stem, disable_logger=True,
+        )
     core = env.unwrapped
     dev = core.device
     robot = core.scene["robot"]
@@ -123,7 +136,9 @@ def main() -> int:
     for v in SPEEDS:
         cells = []
         for la in LOOKAHEAD:
-            r = next(x for x in rows if x["vx"] == v and x["lookahead_s"] == la)
+            r = next((x for x in rows if x["vx"] == v and x["lookahead_s"] == la), None)
+            if r is None:
+                continue
             cells.append(f"{r['steps_climbed']}{'F' if r['fell_at_s'] else ' '}".rjust(5))
         print(f"{v:4.1f}           " + " ".join(cells))
     return 0

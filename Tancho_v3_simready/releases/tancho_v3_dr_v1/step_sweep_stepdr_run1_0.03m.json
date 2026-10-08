@@ -1,0 +1,269 @@
+{
+ "summary": {
+  "checkpoint": "/home/azul/Tancho/Tancho_v3_simready/logs/rsl_rl/tancho_v3_climb_step_dr/2026-10-08_12-34-18_47bab28/exported/policy.pt",
+  "guidance": 1.0,
+  "step_height_m": 0.03,
+  "duration_s": 6.0,
+  "any_step_climbed": 0,
+  "climbed_without_fall": 0,
+  "fall_rate": 1.0
+ },
+ "rows": [
+  {
+   "vx": 0.3,
+   "lookahead_s": 0.0,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0,
+   "presses": 0,
+   "fell_at_s": 2.5
+  },
+  {
+   "vx": 0.3,
+   "lookahead_s": 0.05,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0566,
+   "presses": 1,
+   "fell_at_s": 2.56
+  },
+  {
+   "vx": 0.3,
+   "lookahead_s": 0.1,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0566,
+   "presses": 1,
+   "fell_at_s": 2.56
+  },
+  {
+   "vx": 0.3,
+   "lookahead_s": 0.15,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0566,
+   "presses": 1,
+   "fell_at_s": 2.56
+  },
+  {
+   "vx": 0.3,
+   "lookahead_s": 0.2,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0388,
+   "presses": 1,
+   "fell_at_s": 4.18
+  },
+  {
+   "vx": 0.3,
+   "lookahead_s": 0.25,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0388,
+   "presses": 2,
+   "fell_at_s": 3.72
+  },
+  {
+   "vx": 0.3,
+   "lookahead_s": 0.3,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0461,
+   "presses": 1,
+   "fell_at_s": 3.08
+  },
+  {
+   "vx": 0.3,
+   "lookahead_s": 0.35,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0425,
+   "presses": 1,
+   "fell_at_s": 3.02
+  },
+  {
+   "vx": 0.4,
+   "lookahead_s": 0.0,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0,
+   "presses": 0,
+   "fell_at_s": 2.1
+  },
+  {
+   "vx": 0.4,
+   "lookahead_s": 0.05,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0545,
+   "presses": 1,
+   "fell_at_s": 2.18
+  },
+  {
+   "vx": 0.4,
+   "lookahead_s": 0.1,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0545,
+   "presses": 1,
+   "fell_at_s": 2.18
+  },
+  {
+   "vx": 0.4,
+   "lookahead_s": 0.15,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0409,
+   "presses": 1,
+   "fell_at_s": 2.3
+  },
+  {
+   "vx": 0.4,
+   "lookahead_s": 0.2,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0246,
+   "presses": 1,
+   "fell_at_s": 2.38
+  },
+  {
+   "vx": 0.4,
+   "lookahead_s": 0.25,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0409,
+   "presses": 1,
+   "fell_at_s": 2.64
+  },
+  {
+   "vx": 0.4,
+   "lookahead_s": 0.3,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0409,
+   "presses": 1,
+   "fell_at_s": 2.64
+  },
+  {
+   "vx": 0.4,
+   "lookahead_s": 0.35,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0248,
+   "presses": 1,
+   "fell_at_s": 2.72
+  },
+  {
+   "vx": 0.5,
+   "lookahead_s": 0.0,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0,
+   "presses": 0,
+   "fell_at_s": 1.84
+  },
+  {
+   "vx": 0.5,
+   "lookahead_s": 0.05,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0448,
+   "presses": 1,
+   "fell_at_s": 1.94
+  },
+  {
+   "vx": 0.5,
+   "lookahead_s": 0.1,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0448,
+   "presses": 1,
+   "fell_at_s": 1.94
+  },
+  {
+   "vx": 0.5,
+   "lookahead_s": 0.15,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0358,
+   "presses": 1,
+   "fell_at_s": 2.06
+  },
+  {
+   "vx": 0.5,
+   "lookahead_s": 0.2,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0358,
+   "presses": 1,
+   "fell_at_s": 2.06
+  },
+  {
+   "vx": 0.5,
+   "lookahead_s": 0.25,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0383,
+   "presses": 1,
+   "fell_at_s": 2.14
+  },
+  {
+   "vx": 0.5,
+   "lookahead_s": 0.3,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0383,
+   "presses": 1,
+   "fell_at_s": 2.14
+  },
+  {
+   "vx": 0.5,
+   "lookahead_s": 0.35,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0387,
+   "presses": 1,
+   "fell_at_s": 2.48
+  },
+  {
+   "vx": 0.6,
+   "lookahead_s": 0.0,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0,
+   "presses": 0,
+   "fell_at_s": 1.68
+  },
+  {
+   "vx": 0.6,
+   "lookahead_s": 0.05,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.048,
+   "presses": 1,
+   "fell_at_s": 1.76
+  },
+  {
+   "vx": 0.6,
+   "lookahead_s": 0.1,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0363,
+   "presses": 1,
+   "fell_at_s": 1.82
+  },
+  {
+   "vx": 0.6,
+   "lookahead_s": 0.15,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0242,
+   "presses": 1,
+   "fell_at_s": 1.84
+  },
+  {
+   "vx": 0.6,
+   "lookahead_s": 0.2,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0367,
+   "presses": 1,
+   "fell_at_s": 1.9
+  },
+  {
+   "vx": 0.6,
+   "lookahead_s": 0.25,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.025,
+   "presses": 1,
+   "fell_at_s": 2.0
+  },
+  {
+   "vx": 0.6,
+   "lookahead_s": 0.3,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0369,
+   "presses": 1,
+   "fell_at_s": 2.0
+  },
+  {
+   "vx": 0.6,
+   "lookahead_s": 0.35,
+   "steps_climbed": 0,
+   "max_axle_dz_m": 0.0369,
+   "presses": 1,
+   "fell_at_s": 2.08
+  }
+ ]
+}
