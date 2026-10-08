@@ -222,3 +222,30 @@ def terrain_levels_tracking(
     move_down = failed & ~move_up
     terrain.update_env_origins(env_ids_t, move_up, move_down)
     return torch.mean(terrain.terrain_levels.float())
+
+
+def terrain_levels_climb(
+    env: ManagerBasedRLEnv,
+    env_ids: Sequence[int],
+    promote_steps: float = 2.0,
+    min_rise_m: float = 0.01,
+    max_rise_m: float = 0.03,
+) -> torch.Tensor:
+    """Stairs: promote when the episode climbed ``promote_steps`` steps of its level's
+    height (``env._climb_best``, kept by ``climb.climb_progress``), demote when it fell
+    having climbed less than half a step.  ``terrain_levels_tracking`` promotes on
+    surviving + speed tracking: on stairs only ~40% of episodes time out, and every
+    run since B1 stalled at level ~1.7 (1-1.4 cm) whatever it learned."""
+    terrain = env.scene.terrain
+    ids = torch.as_tensor(env_ids, device=env.device, dtype=torch.long)
+    if env.common_step_counter == 0 or not hasattr(env, "_climb_best"):
+        return torch.mean(terrain.terrain_levels.float())
+    level = terrain.terrain_levels[ids].float()
+    rows = max(1, terrain.max_terrain_level - 1)
+    rise = min_rise_m + (max_rise_m - min_rise_m) * level / rows
+    best = env._climb_best[ids]
+    failed = env.termination_manager.terminated[ids]
+    move_up = best >= promote_steps * rise
+    move_down = failed & (best < 0.5 * rise)
+    terrain.update_env_origins(ids, move_up, move_down)
+    return torch.mean(terrain.terrain_levels.float())

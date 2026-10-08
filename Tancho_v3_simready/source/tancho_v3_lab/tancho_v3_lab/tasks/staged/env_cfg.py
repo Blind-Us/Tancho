@@ -607,6 +607,7 @@ class TanchoV3ClimbStepDRv2PlayEnvCfg(TanchoV3ClimbStepDRPlayEnvCfg):
 # -- stage 8: stairs, one leg at a time (plan 2026-10-09) ------------------------------
 from .climb import stall_on_command  # noqa: E402
 from .scene import StairSceneCfg  # noqa: E402
+from .terrain import terrain_levels_climb  # noqa: E402
 
 STAIR_LEG_ACTION_SCALE_RAD = 1.0  # URDF thigh +/-1.57, calf 0..3: nominal +/-1.0 stays inside
 
@@ -644,6 +645,9 @@ class TanchoV3StairEnvCfg(TanchoV3ClimbStepDREnvCfg):
         self.commands.base_velocity.ranges.lin_vel_x = (0.2, 0.5)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.3, 0.3)
         self.rewards.stall = RewTerm(func=stall_on_command, weight=-1.0)
+        # Run 2: promote on steps climbed, not on survival + tracking (run 1 stayed at level ~1.8).
+        self.curriculum.terrain_levels.func = terrain_levels_climb
+        self.curriculum.terrain_levels.params = {}
 
 
 @configclass
