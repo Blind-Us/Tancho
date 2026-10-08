@@ -31,6 +31,8 @@ parser.add_argument("--checkpoint", type=Path, required=True)
 parser.add_argument("--guidance", type=float, default=1.0)
 parser.add_argument("--min-clear", type=float, default=0.02)
 parser.add_argument("--output", type=Path, required=True)
+parser.add_argument("--delay-substeps", type=int, default=0, help="fixed control latency, 5 ms physics substeps (0-4)")
+parser.add_argument("--gain-scale", type=float, default=1.0, help="leg Kp/Kd and wheel Kd x this")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 simulation_app = AppLauncher(args).app
@@ -89,6 +91,28 @@ def main() -> int:
         cfg.commands.climb.burst_prob = 0.0
         cfg.commands.climb.both_skew_s = 0.0
     cfg.actions.leg_pos.guidance_scale = args.guidance
+    if args.delay_substeps > 0:
+        from tancho_v3_lab.tasks.staged.climb import ClimbLegActionDelayedCfg, JointVelocityActionDelayedCfg
+
+        leg, wheel = cfg.actions.leg_pos, cfg.actions.wheel_vel
+        d = {"min_delay_substeps": args.delay_substeps, "max_delay_substeps": args.delay_substeps}
+        cfg.actions.leg_pos = ClimbLegActionDelayedCfg(
+            asset_name="robot", joint_names=leg.joint_names, scale=leg.scale, use_default_offset=True,
+            preserve_order=True, guidance_scale=args.guidance, **d)
+        cfg.actions.wheel_vel = JointVelocityActionDelayedCfg(
+            asset_name="robot", joint_names=wheel.joint_names, scale=wheel.scale, use_default_offset=True,
+            preserve_order=True, **d)
+    if args.gain_scale != 1.0:
+        import isaaclab.envs.mdp as mdp
+        from isaaclab.managers import EventTermCfg, SceneEntityCfg
+
+        g = (args.gain_scale, args.gain_scale)
+        cfg.events.eval_leg_gains = EventTermCfg(func=mdp.randomize_actuator_gains, mode="startup", params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=["joint_thigh_.*", "joint_calf_.*"]),
+            "stiffness_distribution_params": g, "damping_distribution_params": g, "operation": "scale"})
+        cfg.events.eval_wheel_gains = EventTermCfg(func=mdp.randomize_actuator_gains, mode="startup", params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=["joint_wheel_.*"]),
+            "damping_distribution_params": g, "operation": "scale"})
     env = gym.make(args.task, cfg=cfg)
     core = env.unwrapped
     dev = core.device
@@ -174,6 +198,8 @@ def main() -> int:
     summary = {
         "checkpoint": str(args.checkpoint.resolve()),
         "guidance": args.guidance,
+        "delay_substeps": args.delay_substeps,
+        "gain_scale": args.gain_scale,
         "scenarios": n,
         "fall_rate": round(falls / n, 4),
         "weak_lift_rate": round(weak / n, 4),

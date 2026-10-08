@@ -411,7 +411,7 @@ class _DelayMixin:
             self._delay_init()
         ids = slice(None) if env_ids is None else env_ids
         k = self.num_envs if env_ids is None else len(env_ids)
-        self._delay[ids] = torch.randint(0, self.cfg.max_delay_substeps + 1, (k, 1), device=self.device)
+        self._delay[ids] = torch.randint(self.cfg.min_delay_substeps, self.cfg.max_delay_substeps + 1, (k, 1), device=self.device)
 
     def _delayed_target(self) -> torch.Tensor:
         cur = self.processed_actions
@@ -440,6 +440,7 @@ class ClimbLegActionDelayed(_DelayMixin, ClimbLegAction):
 @configclass
 class ClimbLegActionDelayedCfg(ClimbLegActionCfg):
     class_type: type = ClimbLegActionDelayed
+    min_delay_substeps: int = 0
     max_delay_substeps: int = 4
 
 
@@ -463,4 +464,5 @@ class JointVelocityActionDelayed(_DelayMixin, mdp.JointVelocityAction):
 @configclass
 class JointVelocityActionDelayedCfg(mdp.JointVelocityActionCfg):
     class_type: type = JointVelocityActionDelayed
+    min_delay_substeps: int = 0
     max_delay_substeps: int = 4
