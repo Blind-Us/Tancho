@@ -565,8 +565,9 @@ class TanchoV3ClimbStepDREnvCfg(TanchoV3ClimbEnvCfg):
             asset_name="robot", joint_names=WHEEL_JOINTS, scale=WHEEL_RATED_SPEED_RAD_S,
             use_default_offset=True, preserve_order=True,
         )
-        # Best timing in the sweep: press 0.15-0.25 s before the tire reaches the edge.
-        self.commands.climb.lookahead_range = (0.15, 0.25)
+        # Run 1 pressed 0.15-0.25 s before the tire reaches the edge (best for ClimbHopDR);
+        # its model_600 climbed best at 0.05-0.15 s (1 cm: 5 steps at 0.5-0.6 m/s).
+        self.commands.climb.lookahead_range = (0.05, 0.2)
         # Press for 1 cm steps too (threshold was 1.2 cm: the 1 cm level never pressed).
         self.commands.climb.rise_threshold = 0.008
         self.commands.climb.burst_prob = 0.0
