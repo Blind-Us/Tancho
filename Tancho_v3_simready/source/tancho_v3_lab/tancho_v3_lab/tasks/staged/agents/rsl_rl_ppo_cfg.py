@@ -101,3 +101,10 @@ class TanchoV3RecoverPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
 class TanchoV3RecoverWidePPORunnerCfg(TanchoV3RecoverPPORunnerCfg):
     max_iterations = 1000
     experiment_name = "tancho_v3_recover_wide"
+
+
+@configclass
+class TanchoV3ClimbHopDRPPORunnerCfg(TanchoV3ClimbHopPPORunnerCfg):
+    # From ClimbHop v2 (--keep_obs_norm).
+    max_iterations = 800
+    experiment_name = "tancho_v3_climb_hop_dr"

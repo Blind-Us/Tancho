@@ -474,3 +474,65 @@ class TanchoV3RecoverPlayEnvCfg(TanchoV3RecoverEnvCfg):
 @configclass
 class TanchoV3RecoverWidePlayEnvCfg(TanchoV3RecoverPlayEnvCfg):
     pass
+
+
+# -- stage 6A DR: ClimbHop with the sim-to-real gaps randomized -----------------------
+from .climb import ClimbLegActionDelayedCfg, JointVelocityActionDelayedCfg  # noqa: E402
+from .scene import LEG_JOINTS, WHEEL_JOINTS, WHEEL_RATED_SPEED_RAD_S, CLIMB_LEG_ACTION_SCALE_RAD  # noqa: E402
+
+
+@configclass
+class HopDREventsCfg(EventsCfg):
+    # Motor loops: leg Kp / Kd and wheel velocity-loop Kd x U(0.8, 1.2) per env.
+    leg_gains = EventTerm(
+        func=mdp.randomize_actuator_gains,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=LEG_JOINTS),
+            "stiffness_distribution_params": (0.8, 1.2),
+            "damping_distribution_params": (0.8, 1.2),
+            "operation": "scale",
+        },
+    )
+    wheel_gains = EventTerm(
+        func=mdp.randomize_actuator_gains,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=WHEEL_JOINTS),
+            "damping_distribution_params": (0.8, 1.2),
+            "operation": "scale",
+        },
+    )
+    # Body center of mass +/-1 cm (battery / wiring placement on the real robot).
+    base_com = EventTerm(
+        func=mdp.randomize_rigid_body_com,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=["base_link_root"]),
+            "com_range": {"x": (-0.01, 0.01), "y": (-0.01, 0.01), "z": (-0.01, 0.01)},
+        },
+    )
+
+
+@configclass
+class TanchoV3ClimbHopDREnvCfg(TanchoV3ClimbHopEnvCfg):
+    """ClimbHop v2 + motor gain / COM randomization + 0-20 ms control latency.
+    From the v2 checkpoint (--keep_obs_norm); same observation, action and deployment."""
+
+    events: HopDREventsCfg = HopDREventsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos = ClimbLegActionDelayedCfg(
+            asset_name="robot", joint_names=LEG_JOINTS, scale=CLIMB_LEG_ACTION_SCALE_RAD,
+            use_default_offset=True, preserve_order=True,
+        )
+        self.actions.wheel_vel = JointVelocityActionDelayedCfg(
+            asset_name="robot", joint_names=WHEEL_JOINTS, scale=WHEEL_RATED_SPEED_RAD_S,
+            use_default_offset=True, preserve_order=True,
+        )
+
+
+@configclass
+class TanchoV3ClimbHopDRPlayEnvCfg(TanchoV3ClimbHopPlayEnvCfg):
+    pass

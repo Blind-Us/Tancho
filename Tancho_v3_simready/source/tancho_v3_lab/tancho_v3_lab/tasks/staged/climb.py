@@ -392,3 +392,75 @@ def bad_orientation_gated(env: ManagerBasedRLEnv, limit_angle: float, limit_angl
     limit = torch.where(pressed, torch.full_like(pressed, limit_angle_lift, dtype=torch.float), torch.full_like(pressed, limit_angle, dtype=torch.float))
     g = env.scene["robot"].data.projected_gravity_b
     return torch.acos((-g[:, 2]).clamp(-1.0, 1.0)) > limit
+
+
+# -- control latency (domain randomization) -------------------------------------------
+class _DelayMixin:
+    """Per env, the first ``d`` of the 4 physics substeps after a policy step still use
+    the previous target (d ~ U{0..max_delay_substeps}, resampled on reset): 0-20 ms of
+    Pi -> motor latency at 5 ms resolution."""
+
+    def _delay_init(self):
+        n = self.num_envs
+        self._prev_target = None
+        self._substep = 0
+        self._delay = torch.zeros(n, 1, dtype=torch.long, device=self.device)
+
+    def _delay_reset(self, env_ids):
+        if not hasattr(self, "_delay"):
+            self._delay_init()
+        ids = slice(None) if env_ids is None else env_ids
+        k = self.num_envs if env_ids is None else len(env_ids)
+        self._delay[ids] = torch.randint(0, self.cfg.max_delay_substeps + 1, (k, 1), device=self.device)
+
+    def _delayed_target(self) -> torch.Tensor:
+        cur = self.processed_actions
+        if self._prev_target is None or self.cfg.max_delay_substeps == 0:
+            return cur
+        return torch.where(self._substep < self._delay, self._prev_target, cur)
+
+
+class ClimbLegActionDelayed(_DelayMixin, ClimbLegAction):
+    def process_actions(self, actions: torch.Tensor):
+        if not hasattr(self, "_delay"):
+            self._delay_reset(None)
+        self._prev_target = self._processed_actions.clone()
+        super().process_actions(actions)
+        self._substep = 0
+
+    def apply_actions(self):
+        self._asset.set_joint_position_target(self._delayed_target(), joint_ids=self._joint_ids)
+        self._substep += 1
+
+    def reset(self, env_ids=None):
+        super().reset(env_ids)
+        self._delay_reset(env_ids)
+
+
+@configclass
+class ClimbLegActionDelayedCfg(ClimbLegActionCfg):
+    class_type: type = ClimbLegActionDelayed
+    max_delay_substeps: int = 4
+
+
+class JointVelocityActionDelayed(_DelayMixin, mdp.JointVelocityAction):
+    def process_actions(self, actions: torch.Tensor):
+        if not hasattr(self, "_delay"):
+            self._delay_reset(None)
+        self._prev_target = self._processed_actions.clone()
+        super().process_actions(actions)
+        self._substep = 0
+
+    def apply_actions(self):
+        self._asset.set_joint_velocity_target(self._delayed_target(), joint_ids=self._joint_ids)
+        self._substep += 1
+
+    def reset(self, env_ids=None):
+        super().reset(env_ids)
+        self._delay_reset(env_ids)
+
+
+@configclass
+class JointVelocityActionDelayedCfg(mdp.JointVelocityActionCfg):
+    class_type: type = JointVelocityActionDelayed
+    max_delay_substeps: int = 4
