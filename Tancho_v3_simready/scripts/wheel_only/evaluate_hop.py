@@ -33,6 +33,8 @@ parser.add_argument("--gap", type=float, default=3.0, help="s between rising edg
 parser.add_argument("--press-s", type=float, default=0.4, help="s each trigger is held")
 parser.add_argument("--yaw", type=float, default=0.0, help="yaw-rate command (rad/s)")
 parser.add_argument("--output", type=Path, required=True)
+parser.add_argument("--terrain", choices=["flat", "rough"], default="flat", help="rough: one tile of the HOP rough terrain at --difficulty (1.0 = 2 cm peak-to-peak); clearance is then relative to the start ground")
+parser.add_argument("--difficulty", type=float, default=1.0)
 parser.add_argument("--video", type=Path, default=None, help="record an mp4 into this folder (needs --enable_cameras)")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
@@ -64,6 +66,10 @@ def main() -> int:
     cfg.commands.climb.random_press_prob = 0.0
     cfg.commands.climb.auto_prob = 0.0
     cfg.actions.leg_pos.guidance_scale = args.guidance
+    if args.terrain == "rough":
+        from tancho_v3_lab.tasks.staged.terrain import HOP_GENERATOR, make_terrain, play_generator
+
+        cfg.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, "rough", args.difficulty, size=16.0), max_init_level=None)
     env = gym.make(args.task, cfg=cfg, render_mode="rgb_array" if args.video else None)
     if args.video:
         steps = round((2.0 + GAP_S * (len(schedule) - 1) + 3.0) / cfg.sim.dt / cfg.decimation) - 2

@@ -1,0 +1,56 @@
+{
+  "checkpoint": "/home/azul/Tancho/Tancho_v3_simready/logs/rsl_rl/tancho_v3_climb_hop/2026-10-08_03-34-23_3f4fab9/exported/policy.pt",
+  "guidance": 1.0,
+  "vx": 0.4,
+  "yaw": 0.0,
+  "gap_s": 1.2,
+  "press_s": 0.4,
+  "terminated_at_s": null,
+  "presses": [
+    {
+      "mode": "LT",
+      "clear_L_m": 0.026896154507994652,
+      "clear_R_m": 0.0,
+      "pass": true
+    },
+    {
+      "mode": "RT",
+      "clear_L_m": 0.0,
+      "clear_R_m": 0.02838546596467495,
+      "pass": true
+    },
+    {
+      "mode": "LT+RT",
+      "clear_L_m": 0.028495347127318382,
+      "clear_R_m": 0.02732205204665661,
+      "pass": true
+    },
+    {
+      "mode": "LT+RT",
+      "clear_L_m": 0.014810806140303612,
+      "clear_R_m": 0.020116141065955162,
+      "pass": false
+    },
+    {
+      "mode": "LT",
+      "clear_L_m": 0.03391432762145996,
+      "clear_R_m": 0.0,
+      "pass": true
+    },
+    {
+      "mode": "RT",
+      "clear_L_m": 0.0,
+      "clear_R_m": 0.03993595391511917,
+      "pass": true
+    },
+    {
+      "mode": "LT+RT",
+      "clear_L_m": 0.015954425558447838,
+      "clear_R_m": 0.016007302328944206,
+      "pass": false
+    }
+  ],
+  "pass_no_failure": true,
+  "pass_lift": false,
+  "pass_all": false
+}
