@@ -228,6 +228,8 @@ def terrain_levels_climb(
     env: ManagerBasedRLEnv,
     env_ids: Sequence[int],
     promote_steps: float = 2.0,
+    promote_tracking: float = 0.0,
+    reward_term: str = "lin_vel_xy",
     min_rise_m: float = 0.01,
     max_rise_m: float = 0.03,
 ) -> torch.Tensor:
@@ -246,6 +248,11 @@ def terrain_levels_climb(
     best = env._climb_best[ids]
     failed = env.termination_manager.terminated[ids]
     move_up = best >= promote_steps * rise
+    if promote_tracking > 0.0:
+        term_cfg = env.reward_manager.get_term_cfg(reward_term)
+        episode_s = env.episode_length_buf[ids].float() * env.step_dt
+        ratio = env.reward_manager._episode_sums[reward_term][ids] / (term_cfg.weight * episode_s.clamp(min=env.step_dt))
+        move_up &= ratio > promote_tracking
     move_down = failed & (best < 0.5 * rise)
     terrain.update_env_origins(ids, move_up, move_down)
     return torch.mean(terrain.terrain_levels.float())

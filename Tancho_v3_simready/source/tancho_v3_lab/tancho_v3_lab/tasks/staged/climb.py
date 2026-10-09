@@ -113,6 +113,9 @@ def reference_leg_offsets_v2(phase: torch.Tensor) -> torch.Tensor:
 # top), back to nominal (that push carries the body up).  Needs legs nominal +/-0.82 rad.
 # A hop (both sides started together) keeps the v1 profile.
 REF3_KEYS = ((0.0, 0.0, 0.0), (0.10, -0.32, 0.78), (0.20, -0.04, 0.815), (0.28, 0.045, 0.51), (0.40, 0.0, 0.0))
+# v3 fast (Stair run 3): the 3 cm falls came 0.15 s into single support, so the same
+# keyframes 40% sooner: lifted by 0.06 s, forward by 0.12 s, planted by 0.18 s.
+REF3F_KEYS = ((0.0, 0.0, 0.0), (0.06, -0.32, 0.78), (0.12, -0.04, 0.815), (0.18, 0.045, 0.51), (0.32, 0.0, 0.0))
 
 
 def _keyframes(p: torch.Tensor, keys) -> torch.Tensor:
@@ -126,8 +129,8 @@ def _keyframes(p: torch.Tensor, keys) -> torch.Tensor:
     return out
 
 
-def reference_leg_offsets_v3(phase: torch.Tensor) -> torch.Tensor:
-    step = _keyframes(phase, REF3_KEYS)
+def reference_leg_offsets_v3(phase: torch.Tensor, keys=REF3_KEYS) -> torch.Tensor:
+    step = _keyframes(phase, keys)
     hop = reference_leg_offsets(phase).reshape(-1, 2, 2)
     active = phase < REF_T_END
     both = active.all(dim=1, keepdim=True) & ((phase[:, 0] - phase[:, 1]).abs() < 0.03).unsqueeze(1)
@@ -137,6 +140,8 @@ def reference_leg_offsets_v3(phase: torch.Tensor) -> torch.Tensor:
 def reference_offsets(phase: torch.Tensor, style: str) -> torch.Tensor:
     if style == "v3":
         return reference_leg_offsets_v3(phase)
+    if style == "v3f":
+        return reference_leg_offsets_v3(phase, REF3F_KEYS)
     return reference_leg_offsets_v2(phase) if style == "v2" else reference_leg_offsets(phase)
 
 

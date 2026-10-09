@@ -662,3 +662,23 @@ class TanchoV3StairPlayEnvCfg(TanchoV3ClimbStepDRPlayEnvCfg):
         self.actions.leg_pos.ref_style = "v3"
         self.commands.climb.touch_gap_m = 0.015
         self.commands.climb.sequential = True
+
+
+@configclass
+class TanchoV3StairFastEnvCfg(TanchoV3StairEnvCfg):
+    """Stair run 3 (from run 1): v3 reference 40% faster (less time on one wheel); promote on
+    2 steps climbed AND >50% speed tracking (run 2 promoted on steps alone and slowed
+    to 0.45 tracking: 2 cm 8/32 vs run 1's 15/32)."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.ref_style = "v3f"
+        self.rewards.leg_reference.params = {"ref_style": "v3f"}
+        self.curriculum.terrain_levels.params = {"promote_tracking": 0.5}
+
+
+@configclass
+class TanchoV3StairFastPlayEnvCfg(TanchoV3StairPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.ref_style = "v3f"
