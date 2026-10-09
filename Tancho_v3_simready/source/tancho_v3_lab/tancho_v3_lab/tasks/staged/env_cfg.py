@@ -682,3 +682,26 @@ class TanchoV3StairFastPlayEnvCfg(TanchoV3StairPlayEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.actions.leg_pos.ref_style = "v3f"
+
+
+@configclass
+class TanchoV3StairV2EnvCfg(TanchoV3StairFastEnvCfg):
+    """User 2026-10-09 after playing stair v1: (1) single-leg steps tripped the 15 deg tilt
+    reset -> only body / thigh / calf ground contact ends an episode (legged_gym style),
+    tilt stays a reward cost; (2) the hop was "soft legs, then catch" -> hop v4 (deep
+    crouch, full extension); (3) drift on flat ground -> 20% standing commands (was 5%)."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.terminations.tilt = None
+        self.actions.leg_pos.ref_style = "v4"
+        self.rewards.leg_reference.params = {"ref_style": "v4"}
+        self.commands.base_velocity.rel_standing_envs = 0.2
+
+
+@configclass
+class TanchoV3StairV2PlayEnvCfg(TanchoV3StairFastPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.terminations.tilt = None
+        self.actions.leg_pos.ref_style = "v4"

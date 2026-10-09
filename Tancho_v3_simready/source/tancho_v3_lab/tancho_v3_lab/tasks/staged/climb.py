@@ -137,7 +137,24 @@ def reference_leg_offsets_v3(phase: torch.Tensor, keys=REF3_KEYS) -> torch.Tenso
     return torch.where(both.unsqueeze(-1), hop, step).reshape(-1, 4)
 
 
+# -- hop v4 (user 2026-10-09: "soft legs then catch, no real push"): deep crouch, then the
+# whole leg straightened.  URDF FK: tucked (-0.3, +0.6) = hip-axle 189 mm, extended
+# (+0.38, -0.83) = 248 mm, axle under the hip in both: ~6 cm of stroke (v1 pushed 0.02 s
+# from nominal, v2 from a half crouch).  Then tuck in the air and return.
+HOP4_KEYS = ((0.0, 0.0, 0.0), (0.12, -0.3, 0.6), (0.20, 0.38, -0.83), (0.30, -0.3, 0.6), (0.40, 0.0, 0.0))
+
+
+def reference_leg_offsets_v4(phase: torch.Tensor) -> torch.Tensor:
+    step = _keyframes(phase, REF3F_KEYS)
+    hop = _keyframes(phase, HOP4_KEYS)
+    active = phase < REF_T_END
+    both = active.all(dim=1, keepdim=True) & ((phase[:, 0] - phase[:, 1]).abs() < 0.03).unsqueeze(1)
+    return torch.where(both.unsqueeze(-1), hop, step).reshape(-1, 4)
+
+
 def reference_offsets(phase: torch.Tensor, style: str) -> torch.Tensor:
+    if style == "v4":
+        return reference_leg_offsets_v4(phase)
     if style == "v3":
         return reference_leg_offsets_v3(phase)
     if style == "v3f":
