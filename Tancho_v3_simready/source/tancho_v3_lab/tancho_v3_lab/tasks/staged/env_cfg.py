@@ -699,6 +699,13 @@ class TanchoV3StairV2EnvCfg(TanchoV3StairFastEnvCfg):
         self.actions.leg_pos.ref_style = "v4"
         self.rewards.leg_reference.params = {"ref_style": "v4"}
         self.commands.base_velocity.rel_standing_envs = 0.2
+        # User 22:01: don't punish fast legs while hopping -> leg acc / torque and the
+        # action rate cost 10% while a trigger is (recently) pressed.
+        from .climb import action_rate_l2_relaxed, joint_acc_l2_relaxed, joint_torques_l2_relaxed
+
+        self.rewards.leg_acc.func = joint_acc_l2_relaxed
+        self.rewards.leg_torque.func = joint_torques_l2_relaxed
+        self.rewards.action_rate.func = action_rate_l2_relaxed
 
 
 @configclass

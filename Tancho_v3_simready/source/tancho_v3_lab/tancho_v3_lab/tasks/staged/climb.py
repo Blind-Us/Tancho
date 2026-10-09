@@ -588,3 +588,20 @@ def stall_on_command(env: ManagerBasedRLEnv, command_name: str = "base_velocity"
     cmd = env.command_manager.get_command(command_name)[:, 0]
     vx = env.scene["robot"].data.root_lin_vel_b[:, 0]
     return ((cmd > min_cmd) & (vx < max_speed)).float()
+
+
+def _relaxed(env: ManagerBasedRLEnv, command_name: str, keep: float) -> torch.Tensor:
+    """1 normally, ``keep`` while a trigger is (recently) pressed."""
+    return 1.0 - (1.0 - keep) * env.command_manager.get_term(command_name).recently_pressed
+
+
+def joint_acc_l2_relaxed(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, command_name: str = "climb", keep: float = 0.1) -> torch.Tensor:
+    return mdp.joint_acc_l2(env, asset_cfg) * _relaxed(env, command_name, keep)
+
+
+def joint_torques_l2_relaxed(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, command_name: str = "climb", keep: float = 0.1) -> torch.Tensor:
+    return mdp.joint_torques_l2(env, asset_cfg) * _relaxed(env, command_name, keep)
+
+
+def action_rate_l2_relaxed(env: ManagerBasedRLEnv, command_name: str = "climb", keep: float = 0.1) -> torch.Tensor:
+    return mdp.action_rate_l2(env) * _relaxed(env, command_name, keep)
