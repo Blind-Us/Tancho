@@ -694,6 +694,8 @@ class TanchoV3StairV2EnvCfg(TanchoV3StairFastEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.terminations.tilt = None
+        # User 21:58: the deep crouch puts the calves on the ground -> not a fall.
+        self.terminations.body_contact.params["sensor_cfg"] = SceneEntityCfg("contact_forces", body_names=["base_link_root", "thigh_.*"])
         self.actions.leg_pos.ref_style = "v4"
         self.rewards.leg_reference.params = {"ref_style": "v4"}
         self.commands.base_velocity.rel_standing_envs = 0.2
@@ -704,4 +706,5 @@ class TanchoV3StairV2PlayEnvCfg(TanchoV3StairFastPlayEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.terminations.tilt = None
+        self.terminations.body_contact.params["sensor_cfg"] = SceneEntityCfg("contact_forces", body_names=["base_link_root", "thigh_.*"])
         self.actions.leg_pos.ref_style = "v4"
