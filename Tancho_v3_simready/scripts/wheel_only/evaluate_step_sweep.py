@@ -104,7 +104,7 @@ def main() -> int:
     if contact:
         from isaaclab.utils.math import quat_from_euler_xyz, quat_mul
 
-        yaw = torch.tensor([math.radians(a if not args.only else 0.0) for _, a in grid], device=dev)
+        yaw = torch.tensor([math.radians(a) for _, a in grid], device=dev)
         st = robot.data.root_state_w.clone()
         st[:, 3:7] = quat_mul(quat_from_euler_xyz(torch.zeros_like(yaw), torch.zeros_like(yaw), yaw), st[:, 3:7])
         robot.write_root_state_to_sim(st)
