@@ -153,6 +153,9 @@ def reference_leg_offsets_v4(phase: torch.Tensor) -> torch.Tensor:
 
 
 def reference_offsets(phase: torch.Tensor, style: str) -> torch.Tensor:
+    if style == "deep_squat":
+        shared = phase.min(dim=1, keepdim=True).values.expand(-1, 2)
+        return _keyframes(shared, DEEP_SQUAT_KEYS).reshape(-1, 4)
     if style == "squat":
         shared = phase.min(dim=1, keepdim=True).values.expand(-1, 2)
         return _keyframes(shared, SQUAT_KEYS).reshape(-1, 4)
@@ -186,13 +189,16 @@ HIP6_HOP_KEYS = ((0.0, 0.0, 0.0), (0.06, -0.30, 0.60),
                  (0.40, 0.0, 0.0))
 SQUAT_KEYS = ((0.0, 0.0, 0.0), (0.35, -0.25, 0.50),
               (0.95, -0.25, 0.50), (1.40, 0.0, 0.0))
+DEEP_SQUAT_KEYS = ((0.0, 0.0, 0.0), (0.60, -0.36, 0.89),
+                   (1.60, -0.36, 0.89), (2.20, 0.0, 0.0))
 
 
 def squat_tracking(env):
     term = env.command_manager.get_term("climb")
     robot = env.scene["robot"]
     ids, _ = robot.find_joints(["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"], preserve_order=True)
-    err = robot.data.joint_pos[:, ids] - robot.data.default_joint_pos[:, ids] - reference_offsets(term.phase, "squat")
+    style = env.cfg.actions.leg_pos.ref_style
+    err = robot.data.joint_pos[:, ids] - robot.data.default_joint_pos[:, ids] - reference_offsets(term.phase, style)
     return torch.exp(-err.square().sum(dim=1) / 0.15**2)
 
 

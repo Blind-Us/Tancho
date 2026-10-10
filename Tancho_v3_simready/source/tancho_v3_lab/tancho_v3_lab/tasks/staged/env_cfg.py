@@ -800,3 +800,18 @@ class TanchoV3SquatPlayEnvCfg(TanchoV3HopHipPlayEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.actions.leg_pos.ref_style = "squat"
+
+
+@configclass
+class TanchoV3DeepSquatEnvCfg(TanchoV3SquatEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.ref_style = "deep_squat"
+        self.commands.climb.resampling_time_range = (4.0, 6.0)
+
+
+@configclass
+class TanchoV3DeepSquatPlayEnvCfg(TanchoV3SquatPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.ref_style = "deep_squat"

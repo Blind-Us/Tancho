@@ -10,6 +10,7 @@ import gymnasium as gym
 from . import agents
 
 _STAGES = {
+    "TanchoV3-DeepSquat": ("TanchoV3DeepSquat", "TanchoV3DeepSquatPPORunnerCfg"),
     "TanchoV3-Squat": ("TanchoV3Squat", "TanchoV3SquatPPORunnerCfg"),
     "TanchoV3-HopHip": ("TanchoV3HopHip", "TanchoV3HopHipPPORunnerCfg"),
     "TanchoV3-StairHip": ("TanchoV3StairHip", "TanchoV3StairHipPPORunnerCfg"),
