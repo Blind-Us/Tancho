@@ -92,6 +92,8 @@ def main() -> int:
         cfg.commands.climb.burst_prob = 0.0
         cfg.commands.climb.both_skew_s = 0.0
     cfg.actions.leg_pos.guidance_scale = args.guidance
+    from tancho_v3_lab.tasks.staged.terrain import HOP_GENERATOR, make_terrain, play_generator
+    cfg.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, "flat", 0.0, size=16.0), max_init_level=None)
     if args.ref_style is not None:
         cfg.actions.leg_pos.ref_style = args.ref_style
     if args.delay_substeps > 0:

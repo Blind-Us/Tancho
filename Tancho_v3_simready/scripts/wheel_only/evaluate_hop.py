@@ -73,6 +73,9 @@ def main() -> int:
         from tancho_v3_lab.tasks.staged.terrain import HOP_GENERATOR, make_terrain, play_generator
 
         cfg.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, "rough", args.difficulty, size=16.0), max_init_level=None)
+    else:
+        from tancho_v3_lab.tasks.staged.terrain import HOP_GENERATOR, make_terrain, play_generator
+        cfg.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, "flat", 0.0, size=16.0), max_init_level=None)
     env = gym.make(args.task, cfg=cfg, render_mode="rgb_array" if args.video else None)
     if args.video:
         steps = round((2.0 + GAP_S * (len(schedule) - 1) + 3.0) / cfg.sim.dt / cfg.decimation) - 2
