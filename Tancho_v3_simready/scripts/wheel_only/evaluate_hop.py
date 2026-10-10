@@ -86,6 +86,12 @@ def main() -> int:
     climb = core.command_manager.get_term("climb")
     policy = torch.jit.load(str(args.checkpoint.resolve()), map_location=core.device).eval()
     wheel_ids, _ = robot.find_bodies(["wheel_L", "wheel_R"], preserve_order=True)
+    leg_ids, _ = robot.find_joints(["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"], preserve_order=True)
+    leg_stats = [{"mode": mode, "peak_joint_excursion_rad": [0.0]*4,
+                  "peak_joint_speed_rad_s": [0.0]*4, "peak_joint_torque_Nm": [0.0]*4,
+                  "calf_return_time_s": None, "peak_abs_pitch_after_release_deg": 0.0}
+                 for mode in schedule]
+    return_dwell = [0.0 for _ in schedule]
     dt = core.step_dt
 
     obs, _ = env.reset()
@@ -105,6 +111,24 @@ def main() -> int:
         obs, _, term, _, _ = env.step(policy(obs["policy"]))
         t += dt
         clear = (robot.data.body_pos_w[0, wheel_ids, 2] - WHEEL_RADIUS_M - ground).tolist()
+        qerr = (robot.data.joint_pos[0, leg_ids] - robot.data.default_joint_pos[0, leg_ids]).tolist()
+        qvel = robot.data.joint_vel[0, leg_ids].tolist()
+        tau = robot.data.applied_torque[0, leg_ids].tolist()
+        w, x, y, z = robot.data.root_quat_w[0].tolist()
+        import math
+        pitch = math.degrees(math.asin(max(-1.0, min(1.0, 2*(w*y-z*x)))))
+        for i, s0 in enumerate(starts):
+            if s0 <= t < s0 + GAP_S:
+                stats = leg_stats[i]
+                if t < s0 + 0.6:
+                    for key, values in [("peak_joint_excursion_rad", qerr), ("peak_joint_speed_rad_s", qvel), ("peak_joint_torque_Nm", tau)]:
+                        stats[key] = [max(old, abs(v)) for old, v in zip(stats[key], values)]
+                if t >= s0 + 0.4:
+                    stats["peak_abs_pitch_after_release_deg"] = max(stats["peak_abs_pitch_after_release_deg"], abs(pitch))
+                    selected = [j for j, wanted in zip((1, 3), MODES[schedule[i]]) if wanted]
+                    return_dwell[i] = return_dwell[i] + dt if all(abs(qerr[j]) <= 0.1 for j in selected) else 0.0
+                    if return_dwell[i] >= 0.1 and stats["calf_return_time_s"] is None:
+                        stats["calf_return_time_s"] = round(t - s0 - 0.1, 3)
         for i, s0 in enumerate(starts):
             if s0 <= t < s0 + WINDOW_S:
                 while len(presses) <= i:
@@ -130,6 +154,9 @@ def main() -> int:
         "press_s": PRESS_S,
         "terminated_at_s": terminated_at,
         "presses": presses,
+        "joint_order": ["thigh_L", "calf_L", "thigh_R", "calf_R"],
+        "joint_diagnostics": leg_stats,
+        "calf_return_definition": "pressed calf within 0.1 rad of +0.87 for 0.1 s after reference ends",
         "pass_no_failure": terminated_at is None,
         "pass_lift": len(presses) == len(schedule) and all(ok),
     }

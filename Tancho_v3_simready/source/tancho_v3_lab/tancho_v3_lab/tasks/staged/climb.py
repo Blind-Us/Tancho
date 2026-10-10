@@ -153,6 +153,8 @@ def reference_leg_offsets_v4(phase: torch.Tensor) -> torch.Tensor:
 
 
 def reference_offsets(phase: torch.Tensor, style: str) -> torch.Tensor:
+    if style == "v6":
+        return reference_leg_offsets_v5(phase, HIP6_HOP_KEYS)
     if style == "v5":
         return reference_leg_offsets_v5(phase)
     if style == "v4":
@@ -175,14 +177,18 @@ HIP5_HOP_KEYS = ((0.0, 0.0, 0.0), (0.08, -0.30, 0.60),
 HIP5_STANCE_KEYS = ((0.0, 0.0, 0.0), (0.06, -0.08, 0.12),
                     (0.14, 0.16, -0.30), (0.24, 0.10, -0.18),
                     (0.40, 0.0, 0.0))
+# 0.12 s extension/retraction keeps the knee reference below 12.5 rad/s.
+HIP6_HOP_KEYS = ((0.0, 0.0, 0.0), (0.06, -0.30, 0.60),
+                 (0.18, 0.32, -0.65), (0.30, -0.42, 0.70),
+                 (0.40, 0.0, 0.0))
 
 
-def reference_leg_offsets_v5(phase: torch.Tensor) -> torch.Tensor:
+def reference_leg_offsets_v5(phase: torch.Tensor, hop_keys=HIP5_HOP_KEYS) -> torch.Tensor:
     """Hip swing plus coordinated stance push; nominal pose returns by 0.4 s."""
     active = phase < REF_T_END
     both = active.all(dim=1, keepdim=True) & ((phase[:, 0] - phase[:, 1]).abs() < 0.03).unsqueeze(1)
     swing = _keyframes(phase, HIP5_STEP_KEYS)
-    hop = _keyframes(phase, HIP5_HOP_KEYS)
+    hop = _keyframes(phase, hop_keys)
     own = torch.where(both.unsqueeze(-1), hop, swing)
     other_alone = active.flip(1) & ~active
     stance = _keyframes(phase.flip(1), HIP5_STANCE_KEYS)
@@ -450,7 +456,7 @@ def leg_reference_tracking(env: ManagerBasedRLEnv, command_name: str = "climb", 
     q = robot.data.joint_pos[:, env._climb_leg_ids] - robot.data.default_joint_pos[:, env._climb_leg_ids]
     err = (q - reference_offsets(term.phase, ref_style)).square().reshape(-1, 2, 2).sum(-1)
     active = (term.phase < REF_T_END).float()
-    if ref_style in ("v2", "v5"):  # the stance leg follows its push too
+    if ref_style in ("v2", "v5", "v6"):  # the stance leg follows its push too
         active = torch.maximum(active, active.flip(1))
     return (active * torch.exp(-err / std**2)).sum(dim=1)
 

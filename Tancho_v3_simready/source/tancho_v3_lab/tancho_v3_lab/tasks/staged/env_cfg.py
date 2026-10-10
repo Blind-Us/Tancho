@@ -723,15 +723,19 @@ class TanchoV3StairHipEnvCfg(TanchoV3StairV2EnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        self.actions.leg_pos.ref_style = "v5"
-        self.rewards.leg_reference.params = {"ref_style": "v5"}
+        self.actions.leg_pos.ref_style = "v6"
+        self.rewards.leg_reference.params = {"ref_style": "v6"}
+        self.rewards.hip_lift_balance = RewTerm(func=mdp.flat_orientation_l2, weight=-3.0)
+        self.rewards.hip_lift_rate = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.08)
+        self.rewards.is_alive.weight = 3.0
+        self.rewards.termination_penalty.weight = -100.0
 
 
 @configclass
 class TanchoV3StairHipPlayEnvCfg(TanchoV3StairV2PlayEnvCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.actions.leg_pos.ref_style = "v5"
+        self.actions.leg_pos.ref_style = "v6"
 
 
 @configclass
@@ -743,6 +747,8 @@ class TanchoV3HopHipEnvCfg(TanchoV3StairHipEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.terrain = make_terrain(HOP_GENERATOR)
+        self.actions.leg_pos.ref_style = "v5"
+        self.rewards.leg_reference.params = {"ref_style": "v5"}
         self.commands.climb.sensor_name = "height_scanner"
         self.commands.climb.touch_gap_m = None
         self.commands.climb.sequential = False
@@ -761,6 +767,7 @@ class TanchoV3HopHipPlayEnvCfg(TanchoV3StairHipPlayEnvCfg):
         super().__post_init__()
         self.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, "flat", 0.0, size=16.0), max_init_level=None)
         self.commands.climb.sensor_name = "height_scanner"
+        self.actions.leg_pos.ref_style = "v5"
         self.commands.climb.touch_gap_m = None
         self.commands.climb.sequential = False
         self.commands.climb.auto_prob = 0.0
