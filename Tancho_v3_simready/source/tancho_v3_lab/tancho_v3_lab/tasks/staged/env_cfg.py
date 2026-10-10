@@ -747,6 +747,12 @@ class TanchoV3HopHipEnvCfg(TanchoV3StairHipEnvCfg):
         self.commands.climb.touch_gap_m = None
         self.commands.climb.sequential = False
         self.commands.climb.auto_prob = 0.0
+        # Keep a gentle balance incentive during lift; the inherited gated
+        # terms otherwise charge no tilt/rate cost until the lift is over.
+        self.rewards.hip_lift_balance = RewTerm(func=mdp.flat_orientation_l2, weight=-3.0)
+        self.rewards.hip_lift_rate = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.08)
+        self.rewards.is_alive.weight = 3.0
+        self.rewards.termination_penalty.weight = -100.0
 
 
 @configclass
