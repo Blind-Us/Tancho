@@ -771,3 +771,32 @@ class TanchoV3HopHipPlayEnvCfg(TanchoV3StairHipPlayEnvCfg):
         self.commands.climb.touch_gap_m = None
         self.commands.climb.sequential = False
         self.commands.climb.auto_prob = 0.0
+
+
+@configclass
+class TanchoV3SquatEnvCfg(TanchoV3HopHipEnvCfg):
+    """Flat supported squat/hold/stand with the same hardware observation layout."""
+    def __post_init__(self):
+        super().__post_init__()
+        from .climb import squat_tracking
+        self.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, "flat", 0.0, size=16.0), max_init_level=None)
+        self.actions.leg_pos.ref_style = "squat"
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        self.commands.base_velocity.rel_standing_envs = 1.0
+        self.commands.climb.burst_prob = 0.0
+        self.commands.climb.both_skew_s = 0.0
+        self.commands.climb.resampling_time_range = (3.0, 5.0)
+        self.commands.climb.random_press_s = (0.2, 0.3)
+        self.rewards.leg_reference.weight = 0.0
+        self.rewards.wheel_lift.weight = 0.0
+        self.rewards.climb_progress.weight = 0.0
+        self.rewards.leg_deviation.weight = 0.0
+        self.rewards.squat_tracking = RewTerm(func=squat_tracking, weight=6.0)
+
+
+@configclass
+class TanchoV3SquatPlayEnvCfg(TanchoV3HopHipPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.ref_style = "squat"

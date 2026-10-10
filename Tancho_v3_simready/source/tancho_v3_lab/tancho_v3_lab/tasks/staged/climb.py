@@ -153,6 +153,9 @@ def reference_leg_offsets_v4(phase: torch.Tensor) -> torch.Tensor:
 
 
 def reference_offsets(phase: torch.Tensor, style: str) -> torch.Tensor:
+    if style == "squat":
+        shared = phase.min(dim=1, keepdim=True).values.expand(-1, 2)
+        return _keyframes(shared, SQUAT_KEYS).reshape(-1, 4)
     if style == "v6":
         return reference_leg_offsets_v5(phase, HIP6_HOP_KEYS)
     if style == "v5":
@@ -181,6 +184,16 @@ HIP5_STANCE_KEYS = ((0.0, 0.0, 0.0), (0.06, -0.08, 0.12),
 HIP6_HOP_KEYS = ((0.0, 0.0, 0.0), (0.06, -0.30, 0.60),
                  (0.18, 0.32, -0.65), (0.30, -0.42, 0.70),
                  (0.40, 0.0, 0.0))
+SQUAT_KEYS = ((0.0, 0.0, 0.0), (0.35, -0.25, 0.50),
+              (0.95, -0.25, 0.50), (1.40, 0.0, 0.0))
+
+
+def squat_tracking(env):
+    term = env.command_manager.get_term("climb")
+    robot = env.scene["robot"]
+    ids, _ = robot.find_joints(["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"], preserve_order=True)
+    err = robot.data.joint_pos[:, ids] - robot.data.default_joint_pos[:, ids] - reference_offsets(term.phase, "squat")
+    return torch.exp(-err.square().sum(dim=1) / 0.15**2)
 
 
 def reference_leg_offsets_v5(phase: torch.Tensor, hop_keys=HIP5_HOP_KEYS) -> torch.Tensor:

@@ -139,3 +139,9 @@ class TanchoV3StairHipPPORunnerCfg(TanchoV3StairPPORunnerCfg):
 @configclass
 class TanchoV3HopHipPPORunnerCfg(TanchoV3StairHipPPORunnerCfg):
     experiment_name = "tancho_v3_hop_hip"
+
+
+@configclass
+class TanchoV3SquatPPORunnerCfg(TanchoV3HopHipPPORunnerCfg):
+    max_iterations = 600
+    experiment_name = "tancho_v3_squat"
