@@ -164,6 +164,7 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
+    env.close()  # Flush RecordVideo even when a fall ends the sequence early.
     return 0 if summary["pass_all"] else 1
 
 
