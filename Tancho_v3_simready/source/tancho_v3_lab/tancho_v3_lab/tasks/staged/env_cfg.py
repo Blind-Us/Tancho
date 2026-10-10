@@ -29,7 +29,7 @@ from .observations import ClimbObservationsCfg, FullObservationsCfg, WheelOnlyOb
 from .rewards import ClimbRewardsCfg, FullStandRewardsCfg, FullWalkRewardsCfg, WheelOnlyRewardsCfg
 from .scene import FAILURE_TILT_RAD, DECIMATION, EPISODE_LENGTH_S, NOMINAL_FRICTION, SIM_DT_S, ClimbSceneCfg, FullSceneCfg, WheelOnlySceneCfg
 from .terminations import FullTerminationsCfg, WheelOnlyTerminationsCfg
-from .climb import ClimbTriggerCommandCfg, bad_orientation_gated, reference_guidance
+from .climb import ClimbTriggerCommandCfg, bad_orientation_gated, reference_guidance, rough_squat_press_curriculum
 from .terrain import CLIMB_GENERATOR, HOP_GENERATOR, ROUGH_GENERATOR, STEP_GENERATOR, make_terrain, play_generator, terrain_levels_tracking
 
 
@@ -819,6 +819,11 @@ class TanchoV3DeepSquatPlayEnvCfg(TanchoV3SquatPlayEnvCfg):
 
 # -- stage 10: rough walking + standing + operator-held deep squat -----------------
 @configclass
+class RoughSquatCurriculumCfg(HopCurriculumCfg):
+    press_difficulty = CurrTerm(func=rough_squat_press_curriculum)
+
+
+@configclass
 class TanchoV3RoughSquatEnvCfg(TanchoV3DeepSquatEnvCfg):
     """One deployable policy for WASD, rough standing and held deep squats.
 
@@ -827,6 +832,8 @@ class TanchoV3RoughSquatEnvCfg(TanchoV3DeepSquatEnvCfg):
     standing commands remain frequent enough to suppress idle drift.
     """
 
+    curriculum: RoughSquatCurriculumCfg = RoughSquatCurriculumCfg()
+
     def __post_init__(self):
         super().__post_init__()
         self.scene.terrain = make_terrain(HOP_GENERATOR)
@@ -834,8 +841,9 @@ class TanchoV3RoughSquatEnvCfg(TanchoV3DeepSquatEnvCfg):
         self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
         self.commands.base_velocity.rel_standing_envs = 0.4
         self.commands.base_velocity.resampling_time_range = (4.0, 8.0)
-        self.commands.climb.random_press_prob = 0.6
-        self.commands.climb.random_press_s = (0.5, 3.0)
+        # Curriculum starts at 10% / 0.4-0.8 s and reaches 50% / 0.5-3 s.
+        self.commands.climb.random_press_prob = 0.10
+        self.commands.climb.random_press_s = (0.4, 0.8)
         self.commands.climb.resampling_time_range = (3.0, 6.0)
         self.commands.climb.burst_prob = 0.0
         # Straight-line stability and commanded turns matter more than the light

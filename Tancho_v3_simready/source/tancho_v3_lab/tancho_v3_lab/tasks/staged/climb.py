@@ -489,6 +489,23 @@ def reference_guidance(env: ManagerBasedRLEnv, env_ids, hold_iters: int = 300, a
     return env._climb_ref_scale
 
 
+def rough_squat_press_curriculum(env: ManagerBasedRLEnv, env_ids, steps_per_iter: int = 24) -> float:
+    """Introduce held squats only after rough standing/walking has stabilized."""
+    iteration = env.common_step_counter // steps_per_iter
+    term = env.command_manager.get_term("climb")
+    if iteration < 200:
+        probability, duration, level = 0.10, (0.4, 0.8), 0.0
+    elif iteration < 600:
+        probability, duration, level = 0.25, (0.5, 1.5), 1.0
+    elif iteration < 1000:
+        probability, duration, level = 0.40, (0.5, 2.0), 2.0
+    else:
+        probability, duration, level = 0.50, (0.5, 3.0), 3.0
+    term.cfg.random_press_prob = probability
+    term.cfg.random_press_s = duration
+    return level
+
+
 # -- rewards --------------------------------------------------------------------------
 def leg_reference_tracking(env: ManagerBasedRLEnv, command_name: str = "climb", std: float = 0.25, ref_style: str = "v1") -> torch.Tensor:
     """While a side's reference is running: exp(-|q - q_ref|^2 / std^2) over that leg's two joints."""
