@@ -732,3 +732,29 @@ class TanchoV3StairHipPlayEnvCfg(TanchoV3StairV2PlayEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.actions.leg_pos.ref_style = "v5"
+
+
+@configclass
+class TanchoV3HopHipEnvCfg(TanchoV3StairHipEnvCfg):
+    """Learn recovery on flat/rough first, before spending episodes on stairs."""
+    commands: HopCommandsCfg = HopCommandsCfg()
+    curriculum: HopCurriculumCfg = HopCurriculumCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain = make_terrain(HOP_GENERATOR)
+        self.commands.climb.sensor_name = "height_scanner"
+        self.commands.climb.touch_gap_m = None
+        self.commands.climb.sequential = False
+        self.commands.climb.auto_prob = 0.0
+
+
+@configclass
+class TanchoV3HopHipPlayEnvCfg(TanchoV3StairHipPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, "flat", 0.0, size=16.0), max_init_level=None)
+        self.commands.climb.sensor_name = "height_scanner"
+        self.commands.climb.touch_gap_m = None
+        self.commands.climb.sequential = False
+        self.commands.climb.auto_prob = 0.0

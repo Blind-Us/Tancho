@@ -134,3 +134,8 @@ class TanchoV3StairPPORunnerCfg(TanchoV3ClimbStepDRPPORunnerCfg):
 @configclass
 class TanchoV3StairHipPPORunnerCfg(TanchoV3StairPPORunnerCfg):
     experiment_name = "tancho_v3_stair_hip"
+
+
+@configclass
+class TanchoV3HopHipPPORunnerCfg(TanchoV3StairHipPPORunnerCfg):
+    experiment_name = "tancho_v3_hop_hip"
