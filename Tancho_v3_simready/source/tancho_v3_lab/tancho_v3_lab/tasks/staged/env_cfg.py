@@ -815,3 +815,38 @@ class TanchoV3DeepSquatPlayEnvCfg(TanchoV3SquatPlayEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.actions.leg_pos.ref_style = "deep_squat"
+
+
+# -- stage 10: rough walking + standing + operator-held deep squat -----------------
+@configclass
+class TanchoV3RoughSquatEnvCfg(TanchoV3DeepSquatEnvCfg):
+    """One deployable policy for WASD, rough standing and held deep squats.
+
+    Starts from the 29-observation ClimbHop checkpoint (not the 27-observation
+    flat-walk policy).  Terrain difficulty advances with tracking/survival while
+    standing commands remain frequent enough to suppress idle drift.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain = make_terrain(HOP_GENERATOR)
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.6, 0.6)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+        self.commands.base_velocity.rel_standing_envs = 0.4
+        self.commands.base_velocity.resampling_time_range = (4.0, 8.0)
+        self.commands.climb.random_press_prob = 0.6
+        self.commands.climb.random_press_s = (0.5, 3.0)
+        self.commands.climb.resampling_time_range = (3.0, 6.0)
+        self.commands.climb.burst_prob = 0.0
+        # Straight-line stability and commanded turns matter more than the light
+        # generic smoothness costs; y=0 is already part of lin_vel_xy tracking.
+        self.rewards.lin_vel_xy.weight = 3.0
+        self.rewards.ang_vel_z.weight = 2.0
+
+
+@configclass
+class TanchoV3RoughSquatPlayEnvCfg(TanchoV3DeepSquatPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, "rough", 1.0, size=16.0), max_init_level=None)
+        self.commands.base_velocity.debug_vis = True

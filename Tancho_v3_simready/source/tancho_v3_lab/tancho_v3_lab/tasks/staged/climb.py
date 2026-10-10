@@ -189,8 +189,29 @@ HIP6_HOP_KEYS = ((0.0, 0.0, 0.0), (0.06, -0.30, 0.60),
                  (0.40, 0.0, 0.0))
 SQUAT_KEYS = ((0.0, 0.0, 0.0), (0.35, -0.25, 0.50),
               (0.95, -0.25, 0.50), (1.40, 0.0, 0.0))
-DEEP_SQUAT_KEYS = ((0.0, 0.0, 0.0), (0.60, -0.36, 0.89),
-                   (1.60, -0.36, 0.89), (2.20, 0.0, 0.0))
+# Interactive deep squat: 0.4 s down / 0.4 s up.  The calf reference peaks at
+# 2.225 rad/s, well below the unchanged 12.5 rad/s joint limit.  The middle
+# keyframe remains one second later for non-interactive/reference-only callers;
+# ClimbTriggerCommand freezes at the first keyframe while the trigger is held.
+DEEP_SQUAT_KEYS = ((0.0, 0.0, 0.0), (0.40, -0.36, 0.89),
+                   (1.40, -0.36, 0.89), (1.80, 0.0, 0.0))
+
+
+def _squat_hold_phase(phase: torch.Tensor, trigger: torch.Tensor, released: torch.Tensor, style: str) -> torch.Tensor:
+    """Hold a squat at full depth, then continue smoothly into its return segment."""
+    timings = {
+        "squat": (SQUAT_KEYS[1][0], SQUAT_KEYS[2][0], SQUAT_KEYS[3][0]),
+        "deep_squat": (DEEP_SQUAT_KEYS[1][0], DEEP_SQUAT_KEYS[2][0], DEEP_SQUAT_KEYS[3][0]),
+    }
+    if style not in timings:
+        return phase
+    down_end, return_start, return_end = timings[style]
+    held = trigger > 0.0
+    phase = torch.where(held, phase.clamp(max=down_end), phase)
+    # Preserve the current pose when the button is released before reaching full
+    # depth: the return keyframe has the same linear amplitude in reverse.
+    return_phase = return_start + (1.0 - phase.clamp(0.0, down_end) / down_end) * (return_end - return_start)
+    return torch.where(released, return_phase, phase)
 
 
 def squat_tracking(env):
@@ -370,6 +391,7 @@ class ClimbTriggerCommand(CommandTerm):
         # restarting mid-tuck (v1 fell on ~20% of double taps < 0.4 s apart).
         # Pi: the same rule on the press timer.
         edge = (new > 0.0) & (self.trigger <= 0.0)
+        released = (new <= 0.0) & (self.trigger > 0.0)
         self.phase = self.phase + dt
         busy = self.phase < REF_LOCKOUT_S
         self.queued = self.queued | (edge & busy)
@@ -382,6 +404,8 @@ class ClimbTriggerCommand(CommandTerm):
         self.queued = self.queued & ~start
         self.phase = torch.where(start, torch.zeros_like(self.phase), self.phase)
         self.trigger = new
+        style = getattr(self._env.cfg.actions.leg_pos, "ref_style", "")
+        self.phase = _squat_hold_phase(self.phase, self.trigger, released, style)
         pressed = self.trigger.max(dim=1).values > 0.0
         self.recent_timer = torch.where(pressed, torch.full_like(self.recent_timer, self.cfg.recent_s), (self.recent_timer - dt).clamp(min=0.0))
 

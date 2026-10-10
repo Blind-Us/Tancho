@@ -13,7 +13,9 @@ Xbox triggers on the keyboard (hold):
 
   Q          LT: lift the left leg
   E          RT: lift the right leg
-  J (or Q+E) LT+RT: short hop   (not SPACE: Isaac Sim's play / pause key)
+  SHIFT      LT+RT: squat tasks hold low until release
+  J (or Q+E) LT+RT: alternate trigger / short hop
+                    (not SPACE: Isaac Sim's play / pause key)
 
 ``--terrain flat|rough|step_up|step_down`` picks one 16 m tile (rough = 2 cm
 bumps, steps = 3 cm); ``--guidance`` is the reference-lift injection (the stage-A
@@ -39,6 +41,8 @@ parser.add_argument("--terrain", choices=("flat", "rough", "step_up", "step_down
 parser.add_argument("--step-height", type=float, default=None, help="step_up / step_down tiles: riser height in m (default 3 cm)")
 parser.add_argument("--max-tilt-deg", type=float, default=None, help="reset only beyond this body tilt (default: the task's 15 deg / 35 deg while a trigger is pressed)")
 parser.add_argument("--guidance", type=float, default=1.0, help="Climb tasks: reference-lift injection scale")
+parser.add_argument("--camera-height", type=float, default=0.9, help="Fixed world-space camera height in m")
+parser.add_argument("--camera-distance", type=float, default=1.4, help="Horizontal follow distance in m")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 simulation_app = AppLauncher(args).app
@@ -55,7 +59,14 @@ import tancho_v3_lab.tasks  # noqa: E402,F401
 SPEED_LEVELS = {"KEY_1": (0.2, 0.5), "KEY_2": (0.4, 0.8), "KEY_3": (0.6, 1.0)}
 MOVE_KEYS = {"W": (1, 0), "S": (-1, 0), "A": (0, 1), "D": (0, -1)}
 # Not SPACE: in the Isaac Sim window it toggles timeline play / pause.
-TRIGGER_KEYS = {"Q": (1.0, 0.0), "E": (0.0, 1.0), "J": (1.0, 1.0)}
+TRIGGER_KEYS = {
+    "Q": (1.0, 0.0),
+    "E": (0.0, 1.0),
+    "J": (1.0, 1.0),
+    "LEFT_SHIFT": (1.0, 1.0),
+    "RIGHT_SHIFT": (1.0, 1.0),
+    "SHIFT": (1.0, 1.0),
+}
 
 
 class WasdKeyboard:
@@ -132,7 +143,17 @@ def main() -> None:
     keys = WasdKeyboard()
     print(__doc__, flush=True)
 
+    def update_camera() -> None:
+        """Follow the robot in XY while keeping camera and target heights fixed."""
+        x, y = core.scene["robot"].data.root_pos_w[0, :2].tolist()
+        d = args.camera_distance / (2.0**0.5)
+        core.sim.set_camera_view(
+            eye=[x + d, y + d, args.camera_height],
+            target=[x, y, 0.16],
+        )
+
     obs, _ = env.reset()
+    update_camera()
     while simulation_app.is_running():
         start = time.time()
         if keys.reset_requested:
@@ -142,14 +163,15 @@ def main() -> None:
         with torch.inference_mode():
             command.vel_command_b[0] = torch.tensor([vx, 0.0, wz], device=core.device)
             if climb is not None:
-                # Hold through the term's own press slot so the trigger edge and phase follow
-                # the training code path; the timer is refreshed every step while held.
+                # Refresh the trigger every step while held. Squat tasks clamp their
+                # reference phase at full depth until the key is released.
                 # (Inside inference mode: the term's buffers become inference tensors.)
                 lt, rt = keys.triggers()
                 if lt or rt:
                     climb.random_mode[0] = torch.tensor([lt, rt], device=core.device)
                     climb.random_timer[0] = 1.5 * core.step_dt
             obs, _, term, _, _ = env.step(policy(obs["policy"]))
+        update_camera()
         if bool(term[0]):
             print("[teleop] fell over (tilt > 15 deg or body contact); reset", flush=True)
         # Real time: one 0.02 s policy step per 0.02 s of wall clock.
