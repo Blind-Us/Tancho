@@ -129,3 +129,8 @@ class TanchoV3StairPPORunnerCfg(TanchoV3ClimbStepDRPPORunnerCfg):
     # From step_dr rescaled to the 1.0 rad leg scale (rescale_leg_checkpoint.py, --keep_obs_norm).
     max_iterations = 800
     experiment_name = "tancho_v3_stair"
+
+
+@configclass
+class TanchoV3StairHipPPORunnerCfg(TanchoV3StairPPORunnerCfg):
+    experiment_name = "tancho_v3_stair_hip"

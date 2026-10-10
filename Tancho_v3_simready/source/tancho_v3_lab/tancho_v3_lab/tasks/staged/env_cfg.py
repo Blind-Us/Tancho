@@ -715,3 +715,20 @@ class TanchoV3StairV2PlayEnvCfg(TanchoV3StairFastPlayEnvCfg):
         self.terminations.tilt = None
         self.terminations.body_contact.params["sensor_cfg"] = SceneEntityCfg("contact_forces", body_names=["base_link_root", "thigh_.*"])
         self.actions.leg_pos.ref_style = "v4"
+
+
+@configclass
+class TanchoV3StairHipEnvCfg(TanchoV3StairV2EnvCfg):
+    """Hip-assisted reference experiment, retaining V2 physics and PPO."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.ref_style = "v5"
+        self.rewards.leg_reference.params = {"ref_style": "v5"}
+
+
+@configclass
+class TanchoV3StairHipPlayEnvCfg(TanchoV3StairV2PlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.ref_style = "v5"
