@@ -76,7 +76,7 @@ def _nothigh_root_height(calf_rad: float) -> float:
         rq = _rpy_matrix((0.0, 0.0, calf_rad))
         axle = p0 + r0 @ (p1 + r1 @ rq @ p2)
         radius = float(root.find(f"link[@name='wheel_{side}']/collision/geometry/cylinder").get("radius"))
-        heights.append(radius - axle[2])
+        heights.append(float(radius - axle[2]))
     if abs(heights[0] - heights[1]) > 1.0e-9:
         raise RuntimeError(f"Asymmetric wheel support heights: {heights}")
     return heights[0]
