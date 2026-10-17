@@ -52,6 +52,16 @@ class TanchoV3WalkPPORunnerCfg(TanchoV3WheelOnlyPPORunnerCfg):
 
 
 @configclass
+class TanchoV3NoThighStandPPORunnerCfg(TanchoV3StandPPORunnerCfg):
+    experiment_name = "tancho_v3_nothigh_stand"
+
+
+@configclass
+class TanchoV3NoThighWalkPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
+    experiment_name = "tancho_v3_nothigh_walk"
+
+
+@configclass
 class TanchoV3WalkRoughPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
     # Started from a flat-walk checkpoint with ``--init_checkpoint``.
     experiment_name = "tancho_v3_walk_rough"

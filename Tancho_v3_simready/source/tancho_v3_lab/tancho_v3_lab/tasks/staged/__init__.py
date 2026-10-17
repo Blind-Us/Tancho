@@ -34,6 +34,24 @@ _STAGES = {
     "TanchoV3-RecoverWide": ("TanchoV3RecoverWide", "TanchoV3RecoverWidePPORunnerCfg"),
 }
 
+# 4-DOF no-thigh robot (``nothigh.py``).
+_NOTHIGH_STAGES = {
+    "TanchoV3-NoThigh-Stand": ("TanchoV3NoThighStand", "TanchoV3NoThighStandPPORunnerCfg"),
+    "TanchoV3-NoThigh-Walk": ("TanchoV3NoThighWalk", "TanchoV3NoThighWalkPPORunnerCfg"),
+}
+
+for _task, (_cfg, _runner) in _NOTHIGH_STAGES.items():
+    for _suffix, _cfg_suffix in (("-v0", "EnvCfg"), ("-Play-v0", "PlayEnvCfg")):
+        gym.register(
+            id=_task + _suffix,
+            entry_point="isaaclab.envs:ManagerBasedRLEnv",
+            disable_env_checker=True,
+            kwargs={
+                "env_cfg_entry_point": f"{__name__}.nothigh:{_cfg}{_cfg_suffix}",
+                "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:{_runner}",
+            },
+        )
+
 for _task, (_cfg, _runner) in _STAGES.items():
     for _suffix, _cfg_suffix in (("-v0", "EnvCfg"), ("-Play-v0", "PlayEnvCfg")):
         gym.register(
