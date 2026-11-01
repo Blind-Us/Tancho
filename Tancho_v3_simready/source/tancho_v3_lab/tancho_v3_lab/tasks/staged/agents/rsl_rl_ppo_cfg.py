@@ -87,6 +87,13 @@ class TanchoV3ClimbHopPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
 
 
 @configclass
+class TanchoV3HopPushPPORunnerCfg(TanchoV3WalkPPORunnerCfg):
+    # From hop v2 (ClimbHop, --keep_obs_norm); the v7 hop is fully in by iteration 400.
+    max_iterations = 1000
+    experiment_name = "tancho_v3_hop_push"
+
+
+@configclass
 class TanchoV3ClimbFreePPORunnerCfg(TanchoV3WalkPPORunnerCfg):
     # B2, started from the B1 checkpoint.
     max_iterations = 1500

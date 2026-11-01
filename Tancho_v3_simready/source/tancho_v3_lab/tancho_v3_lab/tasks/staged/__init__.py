@@ -40,6 +40,24 @@ _NOTHIGH_STAGES = {
     "TanchoV3-NoThigh-Walk": ("TanchoV3NoThighWalk", "TanchoV3NoThighWalkPPORunnerCfg"),
 }
 
+# Active hop (``hop_push.py``).
+_HOP_PUSH_STAGES = {
+    "TanchoV3-HopPush": ("TanchoV3HopPush", "TanchoV3HopPushPPORunnerCfg"),
+}
+
+for _module, _stages in (("hop_push", _HOP_PUSH_STAGES),):
+    for _task, (_cfg, _runner) in _stages.items():
+        for _suffix, _cfg_suffix in (("-v0", "EnvCfg"), ("-Play-v0", "PlayEnvCfg")):
+            gym.register(
+                id=_task + _suffix,
+                entry_point="isaaclab.envs:ManagerBasedRLEnv",
+                disable_env_checker=True,
+                kwargs={
+                    "env_cfg_entry_point": f"{__name__}.{_module}:{_cfg}{_cfg_suffix}",
+                    "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:{_runner}",
+                },
+            )
+
 for _task, (_cfg, _runner) in _NOTHIGH_STAGES.items():
     for _suffix, _cfg_suffix in (("-v0", "EnvCfg"), ("-Play-v0", "PlayEnvCfg")):
         gym.register(

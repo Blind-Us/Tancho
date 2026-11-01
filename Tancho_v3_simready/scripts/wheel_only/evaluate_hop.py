@@ -28,6 +28,7 @@ parser.add_argument("--guidance", type=float, default=0.0)
 parser.add_argument("--vx", type=float, default=0.3)
 parser.add_argument("--repeats", type=int, default=2)
 parser.add_argument("--min-clear", type=float, default=0.02)
+parser.add_argument("--min-rise", type=float, default=0.01, help="LT+RT: root must rise this far above its pre-press height while both tires are off the ground (active jump)")
 parser.add_argument("--schedule", default="LT,RT,LT+RT", help="comma-separated presses, repeated --repeats times")
 parser.add_argument("--gap", type=float, default=3.0, help="s between rising edges (double jump: < 1)")
 parser.add_argument("--press-s", type=float, default=0.4, help="s each trigger is held")
@@ -36,7 +37,7 @@ parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("--terrain", choices=["flat", "rough"], default="flat", help="rough: one tile of the HOP rough terrain at --difficulty (1.0 = 2 cm peak-to-peak); clearance is then relative to the start ground")
 parser.add_argument("--difficulty", type=float, default=1.0)
 parser.add_argument("--video", type=Path, default=None, help="record an mp4 into this folder (needs --enable_cameras)")
-parser.add_argument("--ref-style", choices=["v1", "v2", "v3"], default=None, help="reference lift: v1, or v2 (stance push, crouch/push/tuck hop)")
+parser.add_argument("--ref-style", choices=["v1", "v2", "v3", "v7"], default=None, help="reference lift: v1, or v2 (stance push, crouch/push/tuck hop)")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 if args.video:
@@ -99,6 +100,7 @@ def main() -> int:
 
     obs, _ = env.reset()
     ground = float(robot.data.body_pos_w[0, wheel_ids, 2].mean()) - WHEEL_RADIUS_M
+    root_before = [None for _ in schedule]
     presses, terminated_at, t = [], None, 0.0
     starts = [2.0 + GAP_S * i for i in range(len(schedule))]
     total = starts[-1] + 3.0
@@ -132,12 +134,21 @@ def main() -> int:
                     return_dwell[i] = return_dwell[i] + dt if all(abs(qerr[j]) <= 0.1 for j in selected) else 0.0
                     if return_dwell[i] >= 0.1 and stats["calf_return_time_s"] is None:
                         stats["calf_return_time_s"] = round(t - s0 - 0.1, 3)
+        root_z = float(robot.data.root_pos_w[0, 2])
         for i, s0 in enumerate(starts):
+            if s0 - dt <= t < s0:
+                root_before[i] = root_z
             if s0 <= t < s0 + WINDOW_S:
                 while len(presses) <= i:
-                    presses.append({"mode": schedule[len(presses)], "clear_L_m": 0.0, "clear_R_m": 0.0})
+                    presses.append({"mode": schedule[len(presses)], "clear_L_m": 0.0, "clear_R_m": 0.0,
+                                    "both_air_s": 0.0, "air_root_rise_m": 0.0, "peak_root_vz_m_s": 0.0})
                 presses[i]["clear_L_m"] = max(presses[i]["clear_L_m"], clear[0])
                 presses[i]["clear_R_m"] = max(presses[i]["clear_R_m"], clear[1])
+                presses[i]["peak_root_vz_m_s"] = max(presses[i]["peak_root_vz_m_s"], float(robot.data.root_lin_vel_w[0, 2]))
+                if min(clear) > 0.005:  # both tires off the ground
+                    presses[i]["both_air_s"] = round(presses[i]["both_air_s"] + dt, 3)
+                    if root_before[i] is not None:
+                        presses[i]["air_root_rise_m"] = max(presses[i]["air_root_rise_m"], root_z - root_before[i])
         if bool(term[0]):
             terminated_at = round(t, 2)
             break
@@ -147,6 +158,9 @@ def main() -> int:
         want = MODES[p["mode"]]
         cl = [p["clear_L_m"], p["clear_R_m"]]
         p["pass"] = all(c >= args.min_clear for c, w in zip(cl, want) if w > 0)
+        if p["mode"] == "LT+RT":
+            p["pass_active_jump"] = p["air_root_rise_m"] >= args.min_rise
+            p["pass"] = p["pass"] and p["pass_active_jump"]
         ok.append(p["pass"])
     summary = {
         "checkpoint": str(args.checkpoint.resolve()),

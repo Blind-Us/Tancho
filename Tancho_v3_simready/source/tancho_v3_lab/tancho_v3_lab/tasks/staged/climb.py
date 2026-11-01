@@ -152,7 +152,38 @@ def reference_leg_offsets_v4(phase: torch.Tensor) -> torch.Tensor:
     return torch.where(both.unsqueeze(-1), hop, step).reshape(-1, 4)
 
 
+# -- hop v7 (user 2026-11-01: a real upward jump on flat ground that does not fall) ------
+# v4/v6 fell; v1 (hop v2 release) never fell but only pulled the wheels up.  The v7 hop
+# keeps the axle on the vertical line through its nominal position (URDF FK, root frame:
+# x = -16.5 mm for dthigh = -0.41 * dcalf) so the push has no pitch lever arm: slow
+# crouch to axle -185 mm (nominal -224), short settle, then step targets (saturated PD,
+# speed capped by the 12.5 rad/s joint limit) to the -245 mm extension (6 cm stroke),
+# held 0.06 s, a v1 tuck in the air, linear return.  A linear 0.11 s push ramp was
+# tracked too softly (Kp 20): body 0.85-1.0 m/s up but the tires never left the ground;
+# the step version lifts both tires 40 mm (hop v2 weights, not yet trained, falls).
+# Single presses keep the v1 lift (stable in the hop v2 release).
+HOP7_KEYS = ((0.0, 0.0, 0.0), (0.14, -0.245, 0.60), (0.18, -0.245, 0.60), (0.19, 0.245, -0.60),
+             (0.25, 0.245, -0.60), (0.26, -0.3, 0.60), (0.32, -0.3, 0.60), (0.40, 0.0, 0.0))
+HOP7_SYNC_S = 0.07  # both phases within this: a hop (HopCommands skews LT+RT up to 60 ms)
+# Morph v1 hop -> v7 hop (0 -> 1), set by the ``hop7_morph`` curriculum; 1 in Play.
+HOP7_BLEND = [1.0]
+
+
+def is_hop(phase: torch.Tensor, sync_s: float = HOP7_SYNC_S) -> torch.Tensor:
+    """(N, 2) phases -> (N,) both sides running and started together."""
+    return (phase < REF_T_END).all(dim=1) & ((phase[:, 0] - phase[:, 1]).abs() < sync_s)
+
+
+def reference_leg_offsets_v7(phase: torch.Tensor) -> torch.Tensor:
+    v1 = reference_leg_offsets(phase).reshape(-1, 2, 2)
+    a = HOP7_BLEND[0]
+    hop = (1.0 - a) * v1 + a * _keyframes(phase, HOP7_KEYS)
+    return torch.where(is_hop(phase).view(-1, 1, 1), hop, v1).reshape(-1, 4)
+
+
 def reference_offsets(phase: torch.Tensor, style: str) -> torch.Tensor:
+    if style == "v7":
+        return reference_leg_offsets_v7(phase)
     if style == "deep_squat":
         shared = phase.min(dim=1, keepdim=True).values.expand(-1, 2)
         return _keyframes(shared, DEEP_SQUAT_KEYS).reshape(-1, 4)
@@ -489,6 +520,13 @@ def reference_guidance(env: ManagerBasedRLEnv, env_ids, hold_iters: int = 300, a
     return env._climb_ref_scale
 
 
+def hop7_morph(env: ManagerBasedRLEnv, env_ids, start_iters: int = 50, ramp_iters: int = 350, steps_per_iter: int = 24) -> float:
+    """Curriculum: the hop reference goes from v1 (what the start checkpoint knows) to v7."""
+    it = env.common_step_counter / steps_per_iter
+    HOP7_BLEND[0] = float(min(1.0, max(0.0, (it - start_iters) / ramp_iters)))
+    return HOP7_BLEND[0]
+
+
 def rough_squat_press_curriculum(env: ManagerBasedRLEnv, env_ids, steps_per_iter: int = 24) -> float:
     """Introduce held squats only after rough standing/walking has stabilized."""
     iteration = env.common_step_counter // steps_per_iter
@@ -526,6 +564,19 @@ def wheel_lift_on_trigger(env: ManagerBasedRLEnv, command_name: str = "climb", s
     dx, dy, hit_z, wheel_z = _wheel_scan(env, sensor_name)
     clearance = (wheel_z - WHEEL_RADIUS_M - _ground_under(dx, dy, hit_z)).clamp(0.0, max_clearance) / max_clearance
     return (trig * clearance).sum(dim=1)
+
+
+def hop_flight_rise(env: ManagerBasedRLEnv, command_name: str = "climb", sensor_name: str = "height_scanner",
+                    min_clearance: float = 0.005, max_rise: float = 0.04) -> torch.Tensor:
+    """During a hop: root height above the standing height, paid only while both tires
+    are off the ground.  Tucking on the ground (root lower) or standing tall on extended
+    legs (wheels down) earn nothing; only an actual jump does.  [0, 1] at ``max_rise``."""
+    term = env.command_manager.get_term(command_name)
+    dx, dy, hit_z, wheel_z = _wheel_scan(env, sensor_name)
+    ground = _ground_under(dx, dy, hit_z)
+    airborne = ((wheel_z - WHEEL_RADIUS_M - ground) > min_clearance).all(dim=1)
+    rise = env.scene["robot"].data.root_pos_w[:, 2] - ground.mean(dim=1) - FULL_ROOT_HEIGHT_M
+    return (is_hop(term.phase) & airborne).float() * rise.clamp(0.0, max_rise) / max_rise
 
 
 # Wheel axle below the root (base frame) at the nominal leg pose.
