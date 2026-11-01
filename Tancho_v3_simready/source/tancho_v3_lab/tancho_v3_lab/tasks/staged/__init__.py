@@ -43,6 +43,7 @@ _NOTHIGH_STAGES = {
 # Active hop (``hop_push.py``).
 _HOP_PUSH_STAGES = {
     "TanchoV3-HopPush": ("TanchoV3HopPush", "TanchoV3HopPushPPORunnerCfg"),
+    "TanchoV3-HopPushV1": ("TanchoV3HopPushV1", "TanchoV3HopPushPPORunnerCfg"),
 }
 
 for _module, _stages in (("hop_push", _HOP_PUSH_STAGES),):

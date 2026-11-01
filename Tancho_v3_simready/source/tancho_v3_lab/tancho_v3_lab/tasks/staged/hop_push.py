@@ -53,3 +53,25 @@ class TanchoV3HopPushPlayEnvCfg(TanchoV3ClimbHopPlayEnvCfg):
         self.actions.leg_pos.ref_style = "v7"
         # Deploys like hop v2: the Pi plays the reference table on a press.
         self.actions.leg_pos.guidance_scale = 1.0
+
+
+# -- round 2: keep the v1 hop, pay only for height ---------------------------------
+# Round 1 (v7) at iteration 1000: 8/8 hops at 0.3 m/s without a fall, but the root
+# rose 8-10 mm in the air, less than hop v2's own v1 hop (12.4 mm, also at rest), and
+# the first hop standing still fell.  The v1 hop already has a 0.02 s push; here the
+# reference stays v1 and only ``hop_rise`` (+ the relaxed leg costs) asks for more.
+@configclass
+class TanchoV3HopPushV1EnvCfg(TanchoV3ClimbHopEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.rewards.hop_rise = RewTerm(func=climb.hop_flight_rise, weight=20.0)
+        self.rewards.leg_acc.func = climb.joint_acc_l2_relaxed
+        self.rewards.leg_torque.func = climb.joint_torques_l2_relaxed
+        self.rewards.action_rate.func = climb.action_rate_l2_relaxed
+
+
+@configclass
+class TanchoV3HopPushV1PlayEnvCfg(TanchoV3ClimbHopPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.guidance_scale = 1.0
