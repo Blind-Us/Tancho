@@ -75,3 +75,20 @@ class TanchoV3HopPushV1PlayEnvCfg(TanchoV3ClimbHopPlayEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.actions.leg_pos.guidance_scale = 1.0
+
+
+# -- round 3: the height signal was too small to matter ----------------------------
+# Round 2 kept hop v2's behaviour exactly (root +12.7 mm vs 12.4, no falls): hop_rise
+# earned ~0.035 per episode against a total of ~82, so nothing pushed for height.
+# x10 weight, and the cap raised to 6 cm so the gradient does not end at 4 cm.
+@configclass
+class TanchoV3HopPushV1HiEnvCfg(TanchoV3HopPushV1EnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.rewards.hop_rise.weight = 200.0
+        self.rewards.hop_rise.params = {"max_rise": 0.06}
+
+
+@configclass
+class TanchoV3HopPushV1HiPlayEnvCfg(TanchoV3HopPushV1PlayEnvCfg):
+    pass
