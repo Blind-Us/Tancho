@@ -48,11 +48,13 @@ parser.add_argument("--output-dir", type=Path, required=True)
 parser.add_argument("--motors", choices=["implicit", "explicit"], default="implicit",
                     help="implicit: MuJoCo servos (Kd integrated implicitly, like Isaac); explicit: tau computed every 1 ms")
 parser.add_argument("--dt", type=float, default=0.001, help="MuJoCo physics step (Isaac: 0.005)")
+parser.add_argument("--wheel-kd", type=float, default=4.0, help="wheel velocity-loop Kd (StationV4: 1.0)")
 parser.add_argument("--noslip", type=int, default=10, help="MuJoCo noslip_iterations (0 = MuJoCo default)")
 parser.add_argument("--tire", choices=["cylinder", "sphere"], default="cylinder", help="tire collision shape (sphere: same radius)")
 parser.add_argument("--solref", type=float, default=0.005, help="MuJoCo contact time constant (s)")
 args = parser.parse_args()
 DT = args.dt
+KD_WHEEL = args.wheel_kd
 SUB = round(0.02 / DT)  # 50 Hz policy
 
 
@@ -207,7 +209,7 @@ for k in range(steps):
 pre = [r for r in rows if push_step is None or r["time_s"] < args.push_time]
 summary = {
     "checkpoint": str(args.checkpoint), "engine": f"mujoco {mujoco.__version__}", "obs_dim": obs_dim,
-    "duration_s": args.duration, "tire": args.tire, "motors": args.motors, "noslip": args.noslip, "dt": DT, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
+    "duration_s": args.duration, "tire": args.tire, "motors": args.motors, "noslip": args.noslip, "dt": DT, "wheel_kd": KD_WHEEL, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
     "pre_push_max_pitch_dev_deg": max(abs(r["pitch_deg"] - p0) for r in pre),
     "pre_push_max_drift_m": max(r["displacement_m"] for r in pre),
     "max_displacement_m": max(r["displacement_m"] for r in rows),

@@ -251,6 +251,34 @@ class TanchoV3StationV3PlayEnvCfg(TanchoV3StationV3EnvCfg):
         self.actions.wheel_vel.max_delay_substeps = 0
 
 
+# -- round 4: softer wheel velocity loop --------------------------------------------
+# Rounds 1-3 kept the wheel torque at +/-0.45 N m ~80% of the time: with Kd = 4 the
+# loop saturates at 0.11 rad/s of error, below the policy's own action resolution
+# (std 0.03 x 52 rad/s), so the wheels act as a bang-bang torque switch and 12.5 N of
+# traction skids the tires in MuJoCo.  r3's skid cost + low friction made MuJoCo push
+# recovery worse.  Here the velocity loop Kd = 4 -> 1 (saturates at 0.45 rad/s), so
+# torque follows the action proportionally over a wider band.  DEPLOYMENT CHANGE: the
+# DM-H3510 MIT-mode kd must be set to 1.0.  Rewards / friction as round 2.
+WHEEL_KD_V4 = 1.0
+
+
+@configclass
+class TanchoV3StationV4EnvCfg(TanchoV3StationV2EnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.robot = self.scene.robot.replace(actuators={**self.scene.robot.actuators})
+        self.scene.robot.actuators["wheels"] = self.scene.robot.actuators["wheels"].replace(damping=WHEEL_KD_V4)
+
+
+@configclass
+class TanchoV3StationV4PlayEnvCfg(TanchoV3StationPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.rewards = StationV2RewardsCfg()
+        self.scene.robot = self.scene.robot.replace(actuators={**self.scene.robot.actuators})
+        self.scene.robot.actuators["wheels"] = self.scene.robot.actuators["wheels"].replace(damping=WHEEL_KD_V4)
+
+
 @configclass
 class TanchoV3StationPPORunnerCfg(TanchoV3StabilityPPORunnerCfg):
     experiment_name = "tancho_v3_station"
