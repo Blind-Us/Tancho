@@ -96,3 +96,15 @@ for _suffix, _cfg in (("-v0", "TanchoV3StabilityEnvCfg"), ("-Play-v0", "TanchoV3
             "rsl_rl_cfg_entry_point": f"{__name__}.stability:TanchoV3StabilityPPORunnerCfg",
         },
     )
+
+# RL v2 stage 1: station keeping (wheel odometry in obs, position-hold reward, DR).
+for _suffix, _cfg in (("-v0", "TanchoV3StationEnvCfg"), ("-Play-v0", "TanchoV3StationPlayEnvCfg")):
+    gym.register(
+        id="TanchoV3-Station" + _suffix,
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.station:{_cfg}",
+            "rsl_rl_cfg_entry_point": f"{__name__}.station:TanchoV3StationPPORunnerCfg",
+        },
+    )
