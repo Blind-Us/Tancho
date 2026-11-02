@@ -206,6 +206,51 @@ class TanchoV3StationV2PlayEnvCfg(TanchoV3StationPlayEnvCfg):
     pass
 
 
+# -- round 3 ----------------------------------------------------------------------
+# Round 2 (run 2026-11-03_01-16-47): Isaac 60 s drift 1.8 cm, push limit 45 N, +/-10 deg
+# all recovered.  MuJoCo (1 ms, implicit servos, no-slip pass) still drifts 0.6 m / 20 s:
+# the tires skid at 0.15-0.17 m/s on average (Isaac training: ~0.03), the wheel torque
+# being pinned at +/-0.45 N m.  PhysX friction holds more than MuJoCo's at the same mu.
+# Here: lower friction in training and a 5x skid cost, so traction stays under the limit.
+@configclass
+class StationV3RewardsCfg(StationV2RewardsCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        # 0.1 m/s of skid on both wheels costs 2/s.
+        self.wheel_slip.weight = -10.0
+
+
+@configclass
+class StationV3EventsCfg(StationEventsCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        # Robot material x ground 0.8 (multiply): effective 0.2-0.96 (was 0.32-0.96).
+        self.physics_material.params["static_friction_range"] = (0.25, 1.2)
+        self.physics_material.params["dynamic_friction_range"] = (0.25, 1.2)
+
+
+@configclass
+class TanchoV3StationV3EnvCfg(TanchoV3StationEnvCfg):
+    events: StationV3EventsCfg = StationV3EventsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.rewards = StationV3RewardsCfg()
+
+
+@configclass
+class TanchoV3StationV3PlayEnvCfg(TanchoV3StationV3EnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        _to_play(self)
+        self.events.leg_gains = None
+        self.events.wheel_gains = None
+        self.events.base_com = None
+        self.events.physics_material.params["restitution_range"] = (0.0, 0.0)
+        self.actions.leg_pos.max_delay_substeps = 0
+        self.actions.wheel_vel.max_delay_substeps = 0
+
+
 @configclass
 class TanchoV3StationPPORunnerCfg(TanchoV3StabilityPPORunnerCfg):
     experiment_name = "tancho_v3_station"

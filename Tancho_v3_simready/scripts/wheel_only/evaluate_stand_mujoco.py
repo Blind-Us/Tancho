@@ -3,7 +3,8 @@
 
 Builds the robot from the URDF (fixed links fused, free root), a flat floor with the
 Isaac effective tire friction 0.64, and the same motor laws as Isaac's implicit
-actuators, evaluated every 1 ms (Isaac: 5 ms, implicit):
+actuators (MuJoCo servos under implicitfast, 1 ms; ``--motors explicit`` computes tau
+every 1 ms instead, which chatters on the light wheel: dt*Kd/I ~ 200):
   legs   tau = 20 (q* - q) - 0.2 qdot,   |tau| <= 12.5 N m
   wheels tau = 4 (qdot* - qdot),         |tau| <= 0.45 N m
 Policy at 50 Hz.  Observation layout from ``config.json`` of the hop r3 MuJoCo bundle;
@@ -36,7 +37,6 @@ KP, KD_LEG, LEG_TAU = 20.0, 0.2, 12.5
 KD_WHEEL, WHEEL_TAU = 4.0, 0.45
 WHEEL_R = 0.03614
 ROOT_Z = 0.2614 + 0.001
-DT, SUB = 0.001, 20  # 1 ms physics, 50 Hz policy
 FRICTION = 0.64
 
 parser = argparse.ArgumentParser()
@@ -45,9 +45,15 @@ parser.add_argument("--duration", type=float, default=60.0)
 parser.add_argument("--push-time", type=float, default=10.0)
 parser.add_argument("--push-vel", type=float, default=0.0)
 parser.add_argument("--output-dir", type=Path, required=True)
+parser.add_argument("--motors", choices=["implicit", "explicit"], default="implicit",
+                    help="implicit: MuJoCo servos (Kd integrated implicitly, like Isaac); explicit: tau computed every 1 ms")
+parser.add_argument("--dt", type=float, default=0.001, help="MuJoCo physics step (Isaac: 0.005)")
+parser.add_argument("--noslip", type=int, default=10, help="MuJoCo noslip_iterations (0 = MuJoCo default)")
 parser.add_argument("--tire", choices=["cylinder", "sphere"], default="cylinder", help="tire collision shape (sphere: same radius)")
 parser.add_argument("--solref", type=float, default=0.005, help="MuJoCo contact time constant (s)")
 args = parser.parse_args()
+DT = args.dt
+SUB = round(0.02 / DT)  # 50 Hz policy
 
 
 def build_model() -> mujoco.MjModel:
@@ -58,6 +64,9 @@ def build_model() -> mujoco.MjModel:
     spec = mujoco.MjSpec.from_string(text)
     spec.option.timestep = DT
     spec.option.integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
+    # Soft friction constraints let a loaded tire creep (2-3 cm/s here with the wheel
+    # almost still); the no-slip solver pass removes it, as PhysX's rigid friction.
+    spec.option.noslip_iterations = args.noslip
     root = spec.worldbody.first_body()
     root.add_freejoint()
     root.pos = [0, 0, ROOT_Z]
@@ -77,8 +86,24 @@ def build_model() -> mujoco.MjModel:
         a = spec.add_actuator()
         a.target = j
         a.trntype = mujoco.mjtTrn.mjTRN_JOINT
-        a.gainprm[0] = 1.0
+        if args.motors == "explicit":
+            a.gainprm[0] = 1.0
+            a.ctrllimited = False
+            continue
+        # MuJoCo position / velocity servos: implicitfast integrates the Kd term
+        # implicitly, like Isaac's implicit actuators.
+        a.gaintype = mujoco.mjtGain.mjGAIN_FIXED
+        a.biastype = mujoco.mjtBias.mjBIAS_AFFINE
         a.ctrllimited = False
+        a.forcelimited = True
+        if j in LEGS:
+            a.gainprm[0] = KP
+            a.biasprm[0:3] = [0.0, -KP, -KD_LEG]
+            a.forcerange = [-LEG_TAU, LEG_TAU]
+        else:
+            a.gainprm[0] = KD_WHEEL
+            a.biasprm[0:3] = [0.0, 0.0, -KD_WHEEL]
+            a.forcerange = [-WHEEL_TAU, WHEEL_TAU]
     return spec.compile()
 
 
@@ -162,9 +187,12 @@ for k in range(steps):
                 tau = np.clip(KP * (q_t[j] - q) - KD_LEG * qd, -LEG_TAU, LEG_TAU)
             else:
                 tau = np.clip(KD_WHEEL * (v_t[j] - qd), -WHEEL_TAU, WHEEL_TAU)
-                nsat += abs(tau) >= 0.95 * WHEEL_TAU
-            data.ctrl[i] = tau
+                if args.motors == "explicit":
+                    nsat += abs(tau) >= 0.95 * WHEEL_TAU
+            data.ctrl[i] = tau if args.motors == "explicit" else (q_t[j] if j in q_t else v_t[j])
         mujoco.mj_step(model, data)
+        if args.motors == "implicit":
+            nsat += int(sum(abs(data.actuator_force[4 + w]) >= 0.95 * WHEEL_TAU for w in range(2)))
     sat.append(nsat / (2 * SUB))
     t = (k + 1) * DT * SUB
     p = pitch_deg(data.qpos[3:7])
@@ -179,7 +207,7 @@ for k in range(steps):
 pre = [r for r in rows if push_step is None or r["time_s"] < args.push_time]
 summary = {
     "checkpoint": str(args.checkpoint), "engine": f"mujoco {mujoco.__version__}", "obs_dim": obs_dim,
-    "duration_s": args.duration, "tire": args.tire, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
+    "duration_s": args.duration, "tire": args.tire, "motors": args.motors, "noslip": args.noslip, "dt": DT, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
     "pre_push_max_pitch_dev_deg": max(abs(r["pitch_deg"] - p0) for r in pre),
     "pre_push_max_drift_m": max(r["displacement_m"] for r in pre),
     "max_displacement_m": max(r["displacement_m"] for r in rows),
