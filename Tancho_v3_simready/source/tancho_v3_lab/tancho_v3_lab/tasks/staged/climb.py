@@ -498,6 +498,10 @@ class ClimbLegAction(mdp.JointPositionAction):
         if scale > 0.0:
             term = self._env.command_manager.get_term(self.cfg.command_name)
             self._processed_actions += scale * reference_offsets(term.phase, self.cfg.ref_style)
+            if self.cfg.charge_command_name is not None:
+                from .charge import charge_offsets
+
+                self._processed_actions += scale * charge_offsets(self._env.command_manager.get_term(self.cfg.charge_command_name))
 
 
 @configclass
@@ -507,6 +511,8 @@ class ClimbLegActionCfg(mdp.JointPositionActionCfg):
     guidance_scale: float = 1.0
     ref_style: str = "v1"
     """v1: the lift as trained until 2026-10-08; v2: stance-leg push + crouch/push/tuck hop."""
+    charge_command_name: str | None = None
+    """HopCharge: also add the charged-hop reference of this command (``charge.charge_offsets``)."""
 
 
 def climb_phase(env: ManagerBasedRLEnv, command_name: str = "climb") -> torch.Tensor:

@@ -28,6 +28,7 @@ parser.add_argument("--guidance", type=float, default=0.0)
 parser.add_argument("--vx", type=float, default=0.3)
 parser.add_argument("--repeats", type=int, default=2)
 parser.add_argument("--min-clear", type=float, default=0.02)
+parser.add_argument("--charge-s", type=float, default=0.6, help="CHG presses: s the charge button is held (crouch), the jump starts on release")
 parser.add_argument("--min-rise", type=float, default=0.01, help="LT+RT: root must rise this far above its pre-press height while both tires are off the ground (active jump)")
 parser.add_argument("--schedule", default="LT,RT,LT+RT", help="comma-separated presses, repeated --repeats times")
 parser.add_argument("--gap", type=float, default=3.0, help="s between rising edges (double jump: < 1)")
@@ -53,7 +54,7 @@ from tancho_v3_lab.tasks.staged.scene import WHEEL_RADIUS_M  # noqa: E402
 
 PRESS_S, GAP_S = args.press_s, args.gap
 WINDOW_S = min(0.6, GAP_S)
-MODES = {"LT": (1.0, 0.0), "RT": (0.0, 1.0), "LT+RT": (1.0, 1.0)}
+MODES = {"LT": (1.0, 0.0), "RT": (0.0, 1.0), "LT+RT": (1.0, 1.0), "CHG": (1.0, 1.0)}  # CHG: charge button held --charge-s
 
 
 @torch.inference_mode()
@@ -88,6 +89,8 @@ def main() -> int:
     robot = core.scene["robot"]
     vel = core.command_manager.get_term("base_velocity")
     climb = core.command_manager.get_term("climb")
+    charge = core.command_manager.get_term("charge") if "charge" in core.command_manager.active_terms else None
+    hold = [args.charge_s if m == "CHG" else 0.0 for m in schedule]  # window shift: the CHG jump starts on release
     policy = torch.jit.load(str(args.checkpoint.resolve()), map_location=core.device).eval()
     wheel_ids, _ = robot.find_bodies(["wheel_L", "wheel_R"], preserve_order=True)
     leg_ids, _ = robot.find_joints(["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R"], preserve_order=True)
@@ -111,8 +114,11 @@ def main() -> int:
         k = round(t / dt)
         for i, s0 in enumerate(starts):
             if k == round(s0 / dt):
-                climb.random_mode[0] = torch.tensor(MODES[schedule[i]], device=core.device)
-                climb.random_timer[0] = PRESS_S
+                if schedule[i] == "CHG":
+                    charge.hold_timer[0] = args.charge_s
+                else:
+                    climb.random_mode[0] = torch.tensor(MODES[schedule[i]], device=core.device)
+                    climb.random_timer[0] = PRESS_S
         obs, _, term, _, _ = env.step(policy(obs["policy"]))
         t += dt
         clear = (robot.data.body_pos_w[0, wheel_ids, 2] - WHEEL_RADIUS_M - ground).tolist()
@@ -125,10 +131,12 @@ def main() -> int:
         for i, s0 in enumerate(starts):
             if s0 <= t < s0 + GAP_S:
                 stats = leg_stats[i]
-                if t < s0 + 0.6:
+                if s0 + hold[i] + 0.05 <= t < s0 + hold[i] + 0.3:
+                    stats["thigh_tuck_after_release_rad"] = max(stats.get("thigh_tuck_after_release_rad", 0.0), -qerr[0], -qerr[2])
+                if t < s0 + hold[i] + 0.6:
                     for key, values in [("peak_joint_excursion_rad", qerr), ("peak_joint_speed_rad_s", qvel), ("peak_joint_torque_Nm", tau)]:
                         stats[key] = [max(old, abs(v)) for old, v in zip(stats[key], values)]
-                if t >= s0 + 0.4:
+                if t >= s0 + hold[i] + 0.4:
                     stats["peak_abs_pitch_after_release_deg"] = max(stats["peak_abs_pitch_after_release_deg"], abs(pitch))
                     selected = [j for j, wanted in zip((1, 3), MODES[schedule[i]]) if wanted]
                     return_dwell[i] = return_dwell[i] + dt if all(abs(qerr[j]) <= 0.1 for j in selected) else 0.0
@@ -138,7 +146,7 @@ def main() -> int:
         for i, s0 in enumerate(starts):
             if s0 - dt <= t < s0:
                 root_before[i] = root_z
-            if s0 <= t < s0 + WINDOW_S:
+            if s0 <= t < s0 + hold[i] + WINDOW_S:
                 while len(presses) <= i:
                     presses.append({"mode": schedule[len(presses)], "clear_L_m": 0.0, "clear_R_m": 0.0,
                                     "both_air_s": 0.0, "air_root_rise_m": 0.0, "peak_root_vz_m_s": 0.0})
@@ -158,7 +166,7 @@ def main() -> int:
         want = MODES[p["mode"]]
         cl = [p["clear_L_m"], p["clear_R_m"]]
         p["pass"] = all(c >= args.min_clear for c, w in zip(cl, want) if w > 0)
-        if p["mode"] == "LT+RT":
+        if p["mode"] in ("LT+RT", "CHG"):
             p["pass_active_jump"] = p["air_root_rise_m"] >= args.min_rise
             p["pass"] = p["pass"] and p["pass_active_jump"]
         ok.append(p["pass"])

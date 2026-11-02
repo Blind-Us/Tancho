@@ -92,3 +92,60 @@ class TanchoV3HopPushV1HiEnvCfg(TanchoV3HopPushV1EnvCfg):
 @configclass
 class TanchoV3HopPushV1HiPlayEnvCfg(TanchoV3HopPushV1PlayEnvCfg):
     pass
+
+
+# -- charged hop + standard hop in one policy (user 2026-11-02) ---------------------
+from isaaclab.managers import ObservationTermCfg as ObsTerm  # noqa: E402
+
+from . import charge  # noqa: E402
+from .env_cfg import HopCommandsCfg  # noqa: E402
+from .observations import ClimbObservationsCfg  # noqa: E402
+
+
+@configclass
+class HopChargeCommandsCfg(HopCommandsCfg):
+    charge = charge.ChargeCommandCfg()
+
+
+@configclass
+class HopChargeObservationsCfg(ClimbObservationsCfg):
+    @configclass
+    class PolicyCfg(ClimbObservationsCfg.PolicyCfg):
+        """32 dims: the 29 climb dims + charge held, crouch level, time since release."""
+
+        charge_state = ObsTerm(func=charge.charge_obs)
+
+    @configclass
+    class CriticCfg(ClimbObservationsCfg.CriticCfg):
+        charge_state = ObsTerm(func=charge.charge_obs)
+
+    policy: PolicyCfg = PolicyCfg()
+    critic: CriticCfg = CriticCfg()
+
+
+@configclass
+class TanchoV3HopChargeEnvCfg(TanchoV3HopPushV1HiEnvCfg):
+    """From the round-3 checkpoint padded to 32 / 76 inputs (``pad_checkpoint_obs.py``),
+    leg action noise reset to 0.1 (it had collapsed to ~3e-4)."""
+
+    commands: HopChargeCommandsCfg = HopChargeCommandsCfg()
+    observations: HopChargeObservationsCfg = HopChargeObservationsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.charge_command_name = "charge"
+        # Imitation of the charged hop, as leg_reference for the trigger lifts.
+        self.rewards.charge_reference = RewTerm(func=charge.charge_tracking, weight=3.0)
+        # Height of the charged hop: a 0.1 s flight 4 cm up earns 200 * 0.5 * 0.1 = 10.
+        self.rewards.charge_rise = RewTerm(func=charge.charge_flight_rise, weight=200.0)
+
+
+@configclass
+class TanchoV3HopChargePlayEnvCfg(TanchoV3HopPushV1HiPlayEnvCfg):
+    commands: HopChargeCommandsCfg = HopChargeCommandsCfg()
+    observations: HopChargeObservationsCfg = HopChargeObservationsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.charge_command_name = "charge"
+        self.commands.charge.press_prob = 0.0  # presses come from the script / keyboard

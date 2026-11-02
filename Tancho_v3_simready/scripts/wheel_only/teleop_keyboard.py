@@ -17,6 +17,9 @@ Xbox triggers on the keyboard (hold):
   J (or Q+E) LT+RT: alternate trigger / short hop
                     (not SPACE: Isaac Sim's play / pause key)
 
+Charged-hop policies (``TanchoV3-HopCharge-Play-v0``): SHIFT is the standard
+hop (LT+RT) and J is the charge button: hold to crouch, release to jump.
+
 ``--terrain flat|rough|step_up|step_down`` picks one 16 m tile (rough = 2 cm
 bumps, steps = 3 cm); ``--guidance`` is the reference-lift injection (the stage-A
 policy only lifts with 1).
@@ -67,6 +70,8 @@ TRIGGER_KEYS = {
     "RIGHT_SHIFT": (1.0, 1.0),
     "SHIFT": (1.0, 1.0),
 }
+# HopCharge tasks: J is the charge button instead of LT+RT.
+CHARGE_KEY = "J"
 
 
 class WasdKeyboard:
@@ -84,7 +89,7 @@ class WasdKeyboard:
             return True
         name = event.input if isinstance(event.input, str) else event.input.name
         if event.type == carb.input.KeyboardEventType.KEY_PRESS:
-            if name in MOVE_KEYS or name in TRIGGER_KEYS:
+            if name in MOVE_KEYS or name in TRIGGER_KEYS or name == CHARGE_KEY:
                 self.held.add(name)
                 print(f"[teleop] {name} down", flush=True)
             elif name in SPEED_LEVELS:
@@ -102,9 +107,10 @@ class WasdKeyboard:
         turn = sum(m[1] for m in moves)
         return fwd * self.vx_max, turn * self.wz_max
 
-    def triggers(self) -> tuple[float, float]:
-        lt = max((TRIGGER_KEYS[k][0] for k in self.held if k in TRIGGER_KEYS), default=0.0)
-        rt = max((TRIGGER_KEYS[k][1] for k in self.held if k in TRIGGER_KEYS), default=0.0)
+    def triggers(self, charge_mode: bool = False) -> tuple[float, float]:
+        keys = [k for k in self.held if k in TRIGGER_KEYS and not (charge_mode and k == CHARGE_KEY)]
+        lt = max((TRIGGER_KEYS[k][0] for k in keys), default=0.0)
+        rt = max((TRIGGER_KEYS[k][1] for k in keys), default=0.0)
         return lt, rt
 
 
@@ -139,6 +145,7 @@ def main() -> None:
     core = env.unwrapped
     command = core.command_manager.get_term("base_velocity")
     climb = core.command_manager.get_term("climb") if is_climb else None
+    charge = core.command_manager.get_term("charge") if hasattr(cfg.commands, "charge") else None
     policy = torch.jit.load(str(args.checkpoint.resolve()), map_location=core.device).eval()
     keys = WasdKeyboard()
     print(__doc__, flush=True)
@@ -166,10 +173,13 @@ def main() -> None:
                 # Refresh the trigger every step while held. Squat tasks clamp their
                 # reference phase at full depth until the key is released.
                 # (Inside inference mode: the term's buffers become inference tensors.)
-                lt, rt = keys.triggers()
+                lt, rt = keys.triggers(charge_mode=charge is not None)
                 if lt or rt:
                     climb.random_mode[0] = torch.tensor([lt, rt], device=core.device)
                     climb.random_timer[0] = 1.5 * core.step_dt
+            if charge is not None and CHARGE_KEY in keys.held:
+                # Hold to crouch; the release ends the timer and starts the jump.
+                charge.hold_timer[0] = 1.5 * core.step_dt
             obs, _, term, _, _ = env.step(policy(obs["policy"]))
         update_camera()
         if bool(term[0]):

@@ -45,6 +45,7 @@ _HOP_PUSH_STAGES = {
     "TanchoV3-HopPush": ("TanchoV3HopPush", "TanchoV3HopPushPPORunnerCfg"),
     "TanchoV3-HopPushV1": ("TanchoV3HopPushV1", "TanchoV3HopPushPPORunnerCfg"),
     "TanchoV3-HopPushV1Hi": ("TanchoV3HopPushV1Hi", "TanchoV3HopPushPPORunnerCfg"),
+    "TanchoV3-HopCharge": ("TanchoV3HopCharge", "TanchoV3HopPushPPORunnerCfg"),
 }
 
 for _module, _stages in (("hop_push", _HOP_PUSH_STAGES),):
