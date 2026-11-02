@@ -17,8 +17,8 @@ Xbox triggers on the keyboard (hold):
   J (or Q+E) LT+RT: alternate trigger / short hop
                     (not SPACE: Isaac Sim's play / pause key)
 
-Charged-hop policies (``TanchoV3-HopCharge-Play-v0``): SHIFT is the standard
-hop (LT+RT) and J is the charge button: hold to crouch, release to jump.
+Charged-hop policies (``TanchoV3-HopCharge-Play-v0``, user 2026-11-02: every hop
+is a charged hop): SHIFT or J is the charge button: hold to crouch, release to jump.
 
 ``--terrain flat|rough|step_up|step_down`` picks one 16 m tile (rough = 2 cm
 bumps, steps = 3 cm); ``--guidance`` is the reference-lift injection (the stage-A
@@ -70,8 +70,8 @@ TRIGGER_KEYS = {
     "RIGHT_SHIFT": (1.0, 1.0),
     "SHIFT": (1.0, 1.0),
 }
-# HopCharge tasks: J is the charge button instead of LT+RT.
-CHARGE_KEY = "J"
+# HopCharge tasks: these are the charge button instead of LT+RT.
+CHARGE_KEYS = ("J", "LEFT_SHIFT", "RIGHT_SHIFT", "SHIFT")
 
 
 class WasdKeyboard:
@@ -89,7 +89,7 @@ class WasdKeyboard:
             return True
         name = event.input if isinstance(event.input, str) else event.input.name
         if event.type == carb.input.KeyboardEventType.KEY_PRESS:
-            if name in MOVE_KEYS or name in TRIGGER_KEYS or name == CHARGE_KEY:
+            if name in MOVE_KEYS or name in TRIGGER_KEYS or name in CHARGE_KEYS:
                 self.held.add(name)
                 print(f"[teleop] {name} down", flush=True)
             elif name in SPEED_LEVELS:
@@ -108,7 +108,7 @@ class WasdKeyboard:
         return fwd * self.vx_max, turn * self.wz_max
 
     def triggers(self, charge_mode: bool = False) -> tuple[float, float]:
-        keys = [k for k in self.held if k in TRIGGER_KEYS and not (charge_mode and k == CHARGE_KEY)]
+        keys = [k for k in self.held if k in TRIGGER_KEYS and not (charge_mode and k in CHARGE_KEYS)]
         lt = max((TRIGGER_KEYS[k][0] for k in keys), default=0.0)
         rt = max((TRIGGER_KEYS[k][1] for k in keys), default=0.0)
         return lt, rt
@@ -177,7 +177,7 @@ def main() -> None:
                 if lt or rt:
                     climb.random_mode[0] = torch.tensor([lt, rt], device=core.device)
                     climb.random_timer[0] = 1.5 * core.step_dt
-            if charge is not None and CHARGE_KEY in keys.held:
+            if charge is not None and any(k in keys.held for k in CHARGE_KEYS):
                 # Hold to crouch; the release ends the timer and starts the jump.
                 charge.hold_timer[0] = 1.5 * core.step_dt
             obs, _, term, _, _ = env.step(policy(obs["policy"]))
