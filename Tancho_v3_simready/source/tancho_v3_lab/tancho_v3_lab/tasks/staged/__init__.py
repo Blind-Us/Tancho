@@ -84,3 +84,15 @@ for _task, (_cfg, _runner) in _STAGES.items():
                 "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:{_runner}",
             },
         )
+
+# Stability-first retraining, preserving the HopPush actor/action contract.
+for _suffix, _cfg in (("-v0", "TanchoV3StabilityEnvCfg"), ("-Play-v0", "TanchoV3StabilityPlayEnvCfg")):
+    gym.register(
+        id="TanchoV3-Stability" + _suffix,
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.stability:{_cfg}",
+            "rsl_rl_cfg_entry_point": f"{__name__}.stability:TanchoV3StabilityPPORunnerCfg",
+        },
+    )
