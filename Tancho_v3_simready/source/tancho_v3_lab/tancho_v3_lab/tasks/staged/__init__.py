@@ -108,3 +108,14 @@ for _suffix, _cfg in (("-v0", "TanchoV3StationEnvCfg"), ("-Play-v0", "TanchoV3St
             "rsl_rl_cfg_entry_point": f"{__name__}.station:TanchoV3StationPPORunnerCfg",
         },
     )
+
+for _suffix, _cfg in (("-v0", "TanchoV3StationV2EnvCfg"), ("-Play-v0", "TanchoV3StationV2PlayEnvCfg")):
+    gym.register(
+        id="TanchoV3-StationV2" + _suffix,
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.station:{_cfg}",
+            "rsl_rl_cfg_entry_point": f"{__name__}.station:TanchoV3StationPPORunnerCfg",
+        },
+    )

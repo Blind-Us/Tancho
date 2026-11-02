@@ -82,6 +82,25 @@ def wheel_saturation(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = WHEELS,
     return (tau.abs() >= ratio * WHEEL_EFFORT_LIMIT_NM).float().sum(-1)
 
 
+def wheel_slip(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names=["wheel_L", "wheel_R"])) -> torch.Tensor:
+    """Sum over wheels of the tire contact-point planar speed (m/s), for tires on the ground.
+
+    v_contact = v_center + w x (0, 0, -r).  Round 1 kept the wheel torque at the 0.45 N m
+    limit 86% of the time: 12.5 N of traction against ~8 N of friction (13 N normal x 0.64),
+    so the tires skid and the wheel odometry stops measuring travel.
+    """
+    robot = env.scene["robot"]
+    ids = asset_cfg.body_ids
+    v = robot.data.body_lin_vel_w[:, ids]
+    w = robot.data.body_ang_vel_w[:, ids]
+    r = WHEEL_RADIUS_M
+    # w x (0, 0, -r) = (-r * w_y, r * w_x, 0)
+    vc_x = v[..., 0] - r * w[..., 1]
+    vc_y = v[..., 1] + r * w[..., 0]
+    grounded = robot.data.body_pos_w[:, ids, 2] < r + 0.005
+    return (torch.sqrt(vc_x.square() + vc_y.square()) * grounded).sum(-1)
+
+
 # -- config ------------------------------------------------------------------------
 @configclass
 class StationObservationsCfg(ClimbObservationsCfg):
@@ -155,6 +174,36 @@ class TanchoV3StationPlayEnvCfg(TanchoV3StationEnvCfg):
         self.events.physics_material.params["restitution_range"] = (0.0, 0.0)
         self.actions.leg_pos.max_delay_substeps = 0
         self.actions.wheel_vel.max_delay_substeps = 0
+
+
+@configclass
+# -- round 2 ----------------------------------------------------------------------
+# Round 1 (run 2026-11-03_00-05-26): Isaac 60 s zero command parked 12-13 cm from the
+# start with a +/-1.5 deg pitch limit cycle (Stability: 1.85 m); MuJoCo drifted 2.6 m.
+# The wheel odometry obs had std ~0.4 m in training although the root stayed ~0.15 m
+# away: the tires skid at the saturated torque.  Here: pay for skidding, tighter hold.
+@configclass
+class StationV2RewardsCfg(StationRewardsCfg):
+    # 0.1 m/s of skid on both wheels costs 0.4/s.
+    wheel_slip = RewTerm(func=wheel_slip, weight=-2.0, params={"asset_cfg": SceneEntityCfg("robot", body_names=["wheel_L", "wheel_R"])})
+
+    def __post_init__(self):
+        super().__post_init__()
+        # 5 cm now earns 0.37 of the term (was 0.78); 12 cm 0.003 (was 0.24).
+        self.pos_hold.params["std"] = 0.05
+        self.pos_hold.weight = 2.0
+
+
+@configclass
+class TanchoV3StationV2EnvCfg(TanchoV3StationEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.rewards = StationV2RewardsCfg()
+
+
+@configclass
+class TanchoV3StationV2PlayEnvCfg(TanchoV3StationPlayEnvCfg):
+    pass
 
 
 @configclass
