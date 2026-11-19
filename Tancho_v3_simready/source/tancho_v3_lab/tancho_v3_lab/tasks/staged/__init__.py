@@ -141,3 +141,15 @@ for _suffix, _cfg in (("-v0", "TanchoV3StationV4EnvCfg"), ("-Play-v0", "TanchoV3
             "rsl_rl_cfg_entry_point": f"{__name__}.station:TanchoV3StationPPORunnerCfg",
         },
     )
+
+# Station keeping + LT/RT leg lift + hold-to-crouch (user 2026-11-19).
+for _suffix, _cfg in (("-v0", "TanchoV3StationSkillsEnvCfg"), ("-Play-v0", "TanchoV3StationSkillsPlayEnvCfg")):
+    gym.register(
+        id="TanchoV3-StationSkills" + _suffix,
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.station_skills:{_cfg}",
+            "rsl_rl_cfg_entry_point": f"{__name__}.station_skills:TanchoV3StationSkillsPPORunnerCfg",
+        },
+    )
