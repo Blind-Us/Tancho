@@ -48,6 +48,7 @@ parser.add_argument("--push-vel", type=float, default=0.0)
 parser.add_argument("--presses", default="", help="e.g. 'LT:3,RT:6,LT+RT:9,CHG:12' (button:start s); LT/RT held --press-s, CHG held --charge-s")
 parser.add_argument("--press-s", type=float, default=0.4)
 parser.add_argument("--charge-s", type=float, default=0.6)
+parser.add_argument("--charge-jump", type=int, default=1, help="0: released crouch stands back up (StationSquat), 1: charged hop (HopCharge)")
 parser.add_argument("--output-dir", type=Path, required=True)
 parser.add_argument("--motors", choices=["implicit", "explicit"], default="implicit",
                     help="implicit: MuJoCo servos (Kd integrated implicitly, like Isaac); explicit: tau computed every 1 ms")
@@ -197,6 +198,8 @@ def keyframes(p, keys):
 def charge_offset():
     if chg_held > 0:
         return chg_level * CROUCH
+    if not args.charge_jump:
+        return chg_release_level * CROUCH * max(0.0, 1.0 - chg_phase / CHARGE_KEYS[-1][0])
     if chg_phase < CHARGE_STEP_S:
         w = chg_phase / CHARGE_STEP_S
         return chg_release_level * CROUCH * (1 - w) + EXTEND * w

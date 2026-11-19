@@ -142,3 +142,21 @@ class TanchoV3StationSquatPlayEnvCfg(TanchoV3StationSkillsPlayEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.commands.charge.jump = False
+
+
+# -- round 2 of StationSquat: hold position harder ------------------------------------
+# Run 2026-11-19_20-17-17: no falls anywhere (Isaac stand / push / LT / RT / crouch,
+# MuJoCo too), lifts 32-43 mm, full crouch and back.  But zero-command drift 14.5 cm in
+# 60 s (Station r2: 1.8 cm, gate 5 cm): the press costs dilute the position terms.
+@configclass
+class TanchoV3StationSquatHoldEnvCfg(TanchoV3StationSquatEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        # 5 cm away now costs 0.25/s from pos_l1 (was 0.1) and halves pos_hold's 4/s.
+        self.rewards.pos_hold.weight = 4.0
+        self.rewards.pos_l1.weight = -5.0
+
+
+@configclass
+class TanchoV3StationSquatHoldPlayEnvCfg(TanchoV3StationSquatPlayEnvCfg):
+    pass
