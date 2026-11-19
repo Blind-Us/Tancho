@@ -160,3 +160,30 @@ class TanchoV3StationSquatHoldEnvCfg(TanchoV3StationSquatEnvCfg):
 @configclass
 class TanchoV3StationSquatHoldPlayEnvCfg(TanchoV3StationSquatPlayEnvCfg):
     pass
+
+
+# -- MuJoCo tire skid: softer wheel velocity loop ------------------------------------
+# StationSquatHold (run 2026-11-19_21-25-01) passes every Isaac check (60 s drift 1.4 cm,
+# push, LT / RT / crouch) and never falls in MuJoCo, but drifts 1.7 m there in 60 s:
+# the wheel torque sits at its limit and the tires skid (see station.py round 4).
+# Wheel Kd 4 -> 1 as StationV4.  DEPLOYMENT CHANGE: DM-H3510 MIT-mode kd = 1.0.
+from .station import WHEEL_KD_V4  # noqa: E402
+
+
+def _soft_wheels(cfg):
+    cfg.scene.robot = cfg.scene.robot.replace(actuators={**cfg.scene.robot.actuators})
+    cfg.scene.robot.actuators["wheels"] = cfg.scene.robot.actuators["wheels"].replace(damping=WHEEL_KD_V4)
+
+
+@configclass
+class TanchoV3StationSquatKd1EnvCfg(TanchoV3StationSquatHoldEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        _soft_wheels(self)
+
+
+@configclass
+class TanchoV3StationSquatKd1PlayEnvCfg(TanchoV3StationSquatHoldPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        _soft_wheels(self)
