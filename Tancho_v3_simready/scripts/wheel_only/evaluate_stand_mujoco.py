@@ -35,6 +35,7 @@ DEFAULT = {"joint_thigh_L": -0.5, "joint_calf_L": 0.87, "joint_thigh_R": -0.5, "
 LEG_SCALE, WHEEL_SCALE = 0.6, 52.3598776
 KP, KD_LEG, LEG_TAU = 20.0, 0.2, 12.5
 KD_WHEEL, WHEEL_TAU = 4.0, 0.45
+LEG_VEL_LIMIT = 12.5
 WHEEL_R = 0.03614
 ROOT_Z = 0.2614 + 0.001
 FRICTION = 0.64
@@ -44,6 +45,9 @@ parser.add_argument("--checkpoint", type=Path, required=True)
 parser.add_argument("--duration", type=float, default=60.0)
 parser.add_argument("--push-time", type=float, default=10.0)
 parser.add_argument("--push-vel", type=float, default=0.0)
+parser.add_argument("--presses", default="", help="e.g. 'LT:3,RT:6,LT+RT:9,CHG:12' (button:start s); LT/RT held --press-s, CHG held --charge-s")
+parser.add_argument("--press-s", type=float, default=0.4)
+parser.add_argument("--charge-s", type=float, default=0.6)
 parser.add_argument("--output-dir", type=Path, required=True)
 parser.add_argument("--motors", choices=["implicit", "explicit"], default="implicit",
                     help="implicit: MuJoCo servos (Kd integrated implicitly, like Isaac); explicit: tau computed every 1 ms")
@@ -99,8 +103,10 @@ def build_model() -> mujoco.MjModel:
         a.ctrllimited = False
         a.forcelimited = True
         if j in LEGS:
-            a.gainprm[0] = KP
-            a.biasprm[0:3] = [0.0, -KP, -KD_LEG]
+            # Legs: torque computed below with PhysX's 12.5 rad/s joint speed cap
+            # (light enough for an explicit 1 ms PD: dt*Kd/I < 1).
+            a.biastype = mujoco.mjtBias.mjBIAS_NONE
+            a.gainprm[0] = 1.0
             a.forcerange = [-LEG_TAU, LEG_TAU]
         else:
             a.gainprm[0] = KD_WHEEL
@@ -124,7 +130,7 @@ mujoco.mj_forward(model, data)
 
 policy = torch.jit.load(str(args.checkpoint), map_location="cpu").eval()
 obs_dim = None
-for n_in in (31, 29, 32, 35):
+for n_in in (34, 32, 31, 29):
     try:
         with torch.no_grad():
             policy(torch.zeros(1, n_in))
@@ -132,7 +138,7 @@ for n_in in (31, 29, 32, 35):
         break
     except Exception:
         continue
-assert obs_dim in (29, 31), f"unsupported policy input size {obs_dim}"
+assert obs_dim in (29, 31, 32, 34), f"unsupported policy input size {obs_dim}"
 
 RX_T = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float64)  # body -> IMU (+90 deg about x)
 
@@ -157,11 +163,68 @@ def build_obs(last_action):
     o.append(last_action)
     o.append(np.array([data.qpos[qadr[j]] - DEFAULT[j] for j in LEGS]))
     o.append(0.05 * np.array([data.qvel[vadr[j]] for j in LEGS]))
-    o.append(np.zeros(2))  # LT / RT
-    o.append(np.ones(2))  # phase idle
-    if obs_dim == 31:
+    o.append(trig.copy())  # LT / RT held
+    o.append(np.minimum(phase, 0.6) / 0.6)
+    if obs_dim in (31, 34):
         o.append(2.0 * np.clip(WHEEL_R * np.array([data.qpos[qadr[j]] for j in WHEELS]), -0.5, 0.5))
+    if obs_dim in (32, 34):
+        o.append(np.array([chg_held, chg_level, min(chg_phase, 0.6) / 0.6]))
     return np.concatenate(o).astype(np.float32)
+
+
+# -- operator presses: LT / RT lift reference (Pi table) and the HopCharge crouch -------
+LIFT = np.loadtxt(ROOT / "releases/tancho_v3_hop_r3_mujoco/reference_lift_table.csv", delimiter=",", skiprows=1)[:, 2:4]
+CROUCH, CROUCH_S, EXTEND, CHARGE_STEP_S = np.array([-0.305, 0.75]), 0.35, np.array([0.245, -0.60]), 0.01
+CHARGE_KEYS = ((CHARGE_STEP_S, 0.245, -0.60), (0.07, 0.245, -0.60), (0.08, -0.305, 0.75), (0.16, -0.305, 0.75), (0.28, 0.0, 0.0))
+trig, phase = np.zeros(2), np.full(2, 10.0)
+chg_held, chg_level, chg_phase, chg_release_level = 0.0, 0.0, 10.0, 0.0
+PRESSES = [(b, float(t)) for b, t in (x.split(":") for x in args.presses.split(",") if x)]
+
+
+def lift_offset(p):
+    i = int(round(p / 0.02))
+    return LIFT[i] if 0 <= i < len(LIFT) else np.zeros(2)
+
+
+def keyframes(p, keys):
+    for (t0, a0, b0), (t1, a1, b1) in zip(keys[:-1], keys[1:]):
+        if t0 <= p < t1:
+            w = (p - t0) / (t1 - t0)
+            return np.array([a0, b0]) * (1 - w) + np.array([a1, b1]) * w
+    return np.zeros(2)
+
+
+def charge_offset():
+    if chg_held > 0:
+        return chg_level * CROUCH
+    if chg_phase < CHARGE_STEP_S:
+        w = chg_phase / CHARGE_STEP_S
+        return chg_release_level * CROUCH * (1 - w) + EXTEND * w
+    return keyframes(chg_phase, CHARGE_KEYS)
+
+
+def update_buttons(t):
+    """Sides held at time t; rising edges start that side's 0.4 s lift; CHG as ChargeCommand."""
+    global trig, phase, chg_held, chg_level, chg_phase, chg_release_level
+    new = np.zeros(2)
+    new_chg = 0.0
+    for b, t0 in PRESSES:
+        if b == "CHG":
+            new_chg = max(new_chg, float(t0 <= t < t0 + args.charge_s))
+        elif t0 <= t < t0 + args.press_s:
+            if "LT" in b:
+                new[0] = 1.0
+            if "RT" in b:
+                new[1] = 1.0
+    rising = (new > 0) & (trig <= 0) & (phase >= 0.399)
+    phase = np.where(rising, 0.0, phase + 0.02)
+    trig = new
+    released = new_chg <= 0 and chg_held > 0
+    if released:
+        chg_release_level = chg_level
+    chg_phase = 0.0 if released else chg_phase + 0.02
+    chg_level = min(chg_level + 0.02 / CROUCH_S, 1.0) if new_chg > 0 else 0.0
+    chg_held = new_chg
 
 
 last = np.zeros(6, dtype=np.float32)
@@ -175,11 +238,15 @@ for k in range(steps):
         R = quat_to_mat(data.qpos[3:7])
         fwd = R[:, 0].copy(); fwd[2] = 0; fwd /= np.linalg.norm(fwd)
         data.qvel[0:2] += args.push_vel * fwd[:2]
+    update_buttons(k * DT * SUB)
     with torch.no_grad():
         a = policy(torch.from_numpy(build_obs(last)).unsqueeze(0))[0].numpy()
     a = np.clip(a, -1.0, 1.0)
     last = a.astype(np.float32)
-    q_t = {j: DEFAULT[j] + LEG_SCALE * a[i] for i, j in enumerate(LEGS)}
+    off = np.concatenate([lift_offset(phase[0]), lift_offset(phase[1])])
+    if obs_dim in (32, 34):
+        off = off + np.tile(charge_offset(), 2)
+    q_t = {j: DEFAULT[j] + LEG_SCALE * a[i] + off[i] for i, j in enumerate(LEGS)}
     v_t = {j: WHEEL_SCALE * a[4 + i] for i, j in enumerate(WHEELS)}
     nsat = 0
     for _ in range(SUB):
@@ -187,11 +254,13 @@ for k in range(steps):
             q, qd = data.qpos[qadr[j]], data.qvel[vadr[j]]
             if j in q_t:
                 tau = np.clip(KP * (q_t[j] - q) - KD_LEG * qd, -LEG_TAU, LEG_TAU)
+                if abs(qd) >= LEG_VEL_LIMIT and tau * qd > 0:
+                    tau = 0.0
             else:
                 tau = np.clip(KD_WHEEL * (v_t[j] - qd), -WHEEL_TAU, WHEEL_TAU)
                 if args.motors == "explicit":
                     nsat += abs(tau) >= 0.95 * WHEEL_TAU
-            data.ctrl[i] = tau if args.motors == "explicit" else (q_t[j] if j in q_t else v_t[j])
+            data.ctrl[i] = tau if (args.motors == "explicit" or j in q_t) else v_t[j]
         mujoco.mj_step(model, data)
         if args.motors == "implicit":
             nsat += int(sum(abs(data.actuator_force[4 + w]) >= 0.95 * WHEEL_TAU for w in range(2)))
@@ -200,7 +269,8 @@ for k in range(steps):
     p = pitch_deg(data.qpos[3:7])
     disp = float(np.linalg.norm(data.qpos[0:2] - xy0))
     rows.append(dict(time_s=t, pitch_deg=p, displacement_m=disp, height_m=float(data.qpos[2]),
-                     speed_m_s=float(np.linalg.norm(data.qvel[0:2]))))
+                     speed_m_s=float(np.linalg.norm(data.qvel[0:2])),
+                     clear_L_m=float(data.xpos[wheel_bodies[0]][2] - WHEEL_R), clear_R_m=float(data.xpos[wheel_bodies[1]][2] - WHEEL_R)))
     R = quat_to_mat(data.qpos[3:7])
     if math.degrees(math.acos(max(-1.0, min(1.0, R[2, 2])))) > 15.0:
         fell_at = t
@@ -209,12 +279,14 @@ for k in range(steps):
 pre = [r for r in rows if push_step is None or r["time_s"] < args.push_time]
 summary = {
     "checkpoint": str(args.checkpoint), "engine": f"mujoco {mujoco.__version__}", "obs_dim": obs_dim,
-    "duration_s": args.duration, "tire": args.tire, "motors": args.motors, "noslip": args.noslip, "dt": DT, "wheel_kd": KD_WHEEL, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
+    "duration_s": args.duration, "presses": args.presses, "tire": args.tire, "motors": args.motors, "noslip": args.noslip, "dt": DT, "wheel_kd": KD_WHEEL, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
     "pre_push_max_pitch_dev_deg": max(abs(r["pitch_deg"] - p0) for r in pre),
     "pre_push_max_drift_m": max(r["displacement_m"] for r in pre),
     "max_displacement_m": max(r["displacement_m"] for r in rows),
     "end_displacement_m": rows[-1]["displacement_m"], "end_speed_m_s": rows[-1]["speed_m_s"],
     "wheel_saturation_frac": float(np.mean(sat)),
+    "press_clearance_m": {f"{b}@{t0:g}": [round(max(r[c] for r in rows if t0 <= r["time_s"] < t0 + 1.0), 4) if any(t0 <= r["time_s"] < t0 + 1.0 for r in rows) else None
+                                         for c in ("clear_L_m", "clear_R_m")] for b, t0 in PRESSES},
 }
 summary["pass_no_fall"] = fell_at is None
 summary["pass_drift"] = summary["pre_push_max_drift_m"] < 0.05
