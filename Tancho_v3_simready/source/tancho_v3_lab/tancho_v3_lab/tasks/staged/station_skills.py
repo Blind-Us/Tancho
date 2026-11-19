@@ -206,3 +206,20 @@ class TanchoV3StationSquatKd1HoldEnvCfg(TanchoV3StationSquatKd1EnvCfg):
 @configclass
 class TanchoV3StationSquatKd1HoldPlayEnvCfg(TanchoV3StationSquatKd1PlayEnvCfg):
     pass
+
+
+# Goal (user 2026-11-20): MuJoCo 60 s zero-command drift < 5 cm.  Kd1Hold went to 8 cm
+# in Isaac but swung out 42 cm and back over ~80 s in MuJoCo (pitch within 2 deg): the
+# MuJoCo build of the URDF puts the COM ~8 mm further back over the axle than Isaac's
+# zero-pose check, and a slow position loop drifts while re-trimming the lean.
+# Body COM x randomization +/-1 -> +/-2 cm; same rewards as Kd1Hold; from the Kd 1 run.
+@configclass
+class TanchoV3StationSquatKd1ComEnvCfg(TanchoV3StationSquatKd1HoldEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.events.base_com.params["com_range"] = {"x": (-0.02, 0.02), "y": (-0.01, 0.01), "z": (-0.01, 0.01)}
+
+
+@configclass
+class TanchoV3StationSquatKd1ComPlayEnvCfg(TanchoV3StationSquatKd1HoldPlayEnvCfg):
+    pass
