@@ -120,3 +120,25 @@ class TanchoV3StationSkillsPlayEnvCfg(TanchoV3StationSkillsEnvCfg):
 @configclass
 class TanchoV3StationSkillsPPORunnerCfg(TanchoV3StationPPORunnerCfg):
     experiment_name = "tancho_v3_station_skills"
+
+
+# -- no hops (user 2026-11-19: hops are not deployed) --------------------------------
+# StationSkills from HopCharge (run 2026-11-19_19-49-13) plateaued at 31-35% time-outs
+# from iteration 400 to 600 (gate: 50%), mostly tilt.  The LT+RT hop and the charged
+# hop on release are the hardest presses and are not deployed; here random presses
+# are L or R only and a released crouch stands back up over 0.28 s.
+@configclass
+class TanchoV3StationSquatEnvCfg(TanchoV3StationSkillsEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.climb.allow_both = False
+        self.commands.charge.jump = False
+        self.rewards.hop_rise.weight = 0.0
+        self.rewards.charge_rise.weight = 0.0
+
+
+@configclass
+class TanchoV3StationSquatPlayEnvCfg(TanchoV3StationSkillsPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.charge.jump = False

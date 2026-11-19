@@ -343,7 +343,7 @@ class ClimbTriggerCommand(CommandTerm):
         self.lookahead[ids] = torch.empty(k, device=self.device).uniform_(*self.cfg.lookahead_range)
         self.attentive[ids] = torch.rand(k, device=self.device) < self.cfg.auto_prob
         start = torch.rand(k, device=self.device) < self.cfg.random_press_prob
-        mode_id = torch.randint(0, 3, (k,), device=self.device)  # 0 L, 1 R, 2 both
+        mode_id = torch.randint(0, 3 if self.cfg.allow_both else 2, (k,), device=self.device)  # 0 L, 1 R, 2 both
         mode = torch.stack([(mode_id != 1).float(), (mode_id != 0).float()], dim=1)
         self.random_mode[ids] = torch.where(start.unsqueeze(1), mode, self.random_mode[ids])
         dur = torch.empty(k, device=self.device).uniform_(*self.cfg.random_press_s)
@@ -360,7 +360,7 @@ class ClimbTriggerCommand(CommandTerm):
     def _start_random_press(self, mask: torch.Tensor):
         """Start a random L / R / both press now where ``mask``."""
         k = self.num_envs
-        mode_id = torch.randint(0, 3, (k,), device=self.device)
+        mode_id = torch.randint(0, 3 if self.cfg.allow_both else 2, (k,), device=self.device)
         mode = torch.stack([(mode_id != 1).float(), (mode_id != 0).float()], dim=1)
         dur = torch.empty(k, device=self.device).uniform_(*self.cfg.random_press_s)
         self.random_mode = torch.where(mask.unsqueeze(1), mode, self.random_mode)
@@ -480,6 +480,8 @@ class ClimbTriggerCommandCfg(CommandTermCfg):
     """One side at a time: the closer tire first, the other after ``sequential_wait_s`` of that step."""
     sequential_wait_s: float = 0.3
     """A "both" random press starts one side up to this much later (s)."""
+    allow_both: bool = True
+    """False: random presses are L or R only (no LT+RT hop)."""
 
 
 # -- action: legs with optional reference guidance -------------------------------------

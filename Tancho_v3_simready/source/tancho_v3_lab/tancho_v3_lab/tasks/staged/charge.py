@@ -111,6 +111,8 @@ class ChargeCommandCfg(CommandTermCfg):
     press_prob: float = 0.5
     press_s: tuple[float, float] = (0.15, 1.5)
     """Hold time (s): short presses are shallow charges, >= ``CROUCH_S`` full ones."""
+    jump: bool = True
+    """False: releasing stands back up (squat only), no push-off."""
 
 
 def charge_offsets(term: ChargeCommand) -> torch.Tensor:
@@ -120,6 +122,11 @@ def charge_offsets(term: ChargeCommand) -> torch.Tensor:
     held = term.held.unsqueeze(1) * term.level.unsqueeze(1) * crouch  # (N, 2)
     p = term.phase.unsqueeze(1)  # (N, 1)
     start = term.release_level.unsqueeze(1) * crouch
+    if not term.cfg.jump:
+        # Squat only: back up linearly from the crouch reached, over the hop's duration.
+        rise = start * (1.0 - p / CHARGE_END_S).clamp(0.0, 1.0)
+        off = torch.where(term.held.unsqueeze(1) > 0.0, held, torch.where(p < CHARGE_END_S, rise, torch.zeros_like(rise)))
+        return off.repeat(1, 2)
     w = (p / CHARGE_STEP_S).clamp(0.0, 1.0)
     first = start * (1.0 - w) + torch.tensor(EXTEND, device=dev) * w
     rest = _keyframes(p, CHARGE_KEYS).squeeze(1)  # (N, 2); 0 before the first / after the last key
