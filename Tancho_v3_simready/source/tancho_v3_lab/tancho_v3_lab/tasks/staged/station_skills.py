@@ -243,3 +243,19 @@ class TanchoV3StationSquatKd1SoftPlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg
         super().__post_init__()
         mat = self.scene.terrain.physics_material
         self.scene.terrain.physics_material = mat.replace(compliant_contact_stiffness=5000.0, compliant_contact_damping=120.0)
+
+
+# Kd1Com / Kd1Soft checkpoints scatter from 2 to 41 cm of MuJoCo 60 s drift (Isaac 5-23
+# cm): the position loop is weak everywhere.  With a 0.8 m/s kick every 3-6 s the robot
+# is rarely left standing long enough for a slow creep to cost much.  Kicks every 8-14 s,
+# so most of each episode is quiet standing / presses; from Kd1Com iteration 300.
+@configclass
+class TanchoV3StationSquatKd1QuietEnvCfg(TanchoV3StationSquatKd1ComEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.events.push_robot.interval_range_s = (8.0, 14.0)
+
+
+@configclass
+class TanchoV3StationSquatKd1QuietPlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
+    pass

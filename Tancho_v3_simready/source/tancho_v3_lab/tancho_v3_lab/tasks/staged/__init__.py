@@ -219,3 +219,14 @@ for _suffix, _cfg in (("-v0", "TanchoV3StationSquatKd1SoftEnvCfg"), ("-Play-v0",
             "rsl_rl_cfg_entry_point": f"{__name__}.station_skills:TanchoV3StationSkillsPPORunnerCfg",
         },
     )
+
+for _suffix, _cfg in (("-v0", "TanchoV3StationSquatKd1QuietEnvCfg"), ("-Play-v0", "TanchoV3StationSquatKd1QuietPlayEnvCfg")):
+    gym.register(
+        id="TanchoV3-StationSquatKd1Quiet" + _suffix,
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.station_skills:{_cfg}",
+            "rsl_rl_cfg_entry_point": f"{__name__}.station_skills:TanchoV3StationSkillsPPORunnerCfg",
+        },
+    )
