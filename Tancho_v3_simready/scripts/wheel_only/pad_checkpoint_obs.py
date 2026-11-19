@@ -20,24 +20,30 @@ parser.add_argument("--input", required=True)
 parser.add_argument("--output", required=True)
 parser.add_argument("--actor-extra", type=int, required=True)
 parser.add_argument("--critic-extra", type=int, required=True)
+parser.add_argument("--actor-at", type=int, default=None, help="insert the new actor inputs at this index (default: append)")
+parser.add_argument("--critic-at", type=int, default=None, help="insert the new critic inputs at this index (default: append)")
 parser.add_argument("--std", default=None, help="start:end=value, sets distribution.std_param[start:end]")
 args = parser.parse_args()
 
 ckpt = torch.load(args.input, map_location="cpu", weights_only=False)
 
 
-def pad(state: dict, extra: int):
+def pad(state: dict, extra: int, at: int | None):
     if extra == 0:
         return
     w = state["mlp.0.weight"]
-    state["mlp.0.weight"] = torch.cat([w, torch.zeros(w.shape[0], extra, dtype=w.dtype)], dim=1)
+    at = w.shape[1] if at is None else at
+
+    def ins(v, fill):
+        return torch.cat([v[:, :at], torch.full((v.shape[0], extra), fill, dtype=v.dtype), v[:, at:]], dim=1)
+
+    state["mlp.0.weight"] = ins(w, 0.0)
     for key, fill in (("obs_normalizer._mean", 0.0), ("obs_normalizer._var", 1.0), ("obs_normalizer._std", 1.0)):
-        v = state[key]
-        state[key] = torch.cat([v, torch.full((v.shape[0], extra), fill, dtype=v.dtype)], dim=1)
+        state[key] = ins(state[key], fill)
 
 
-pad(ckpt["actor_state_dict"], args.actor_extra)
-pad(ckpt["critic_state_dict"], args.critic_extra)
+pad(ckpt["actor_state_dict"], args.actor_extra, args.actor_at)
+pad(ckpt["critic_state_dict"], args.critic_extra, args.critic_at)
 if args.std:
     span, value = args.std.split("=")
     start, end = (int(x) for x in span.split(":"))
