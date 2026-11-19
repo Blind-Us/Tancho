@@ -259,3 +259,20 @@ class TanchoV3StationSquatKd1QuietEnvCfg(TanchoV3StationSquatKd1ComEnvCfg):
 @configclass
 class TanchoV3StationSquatKd1QuietPlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
     pass
+
+
+# -- the standard hop back in (user 2026-11-20: once drift is under 5 cm, consider hops) --
+# Release squat_kd1_r8_300 (Kd1Com iteration 300) holds 2.4 cm in MuJoCo.  Here LT+RT
+# presses come back (v1 hop reference, as hop r3) with hop_rise; the charge still stands
+# back up on release.  Everything else as Kd1Com; from r8_300.
+@configclass
+class TanchoV3StationHopKd1EnvCfg(TanchoV3StationSquatKd1ComEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.climb.allow_both = True
+        self.rewards.hop_rise.weight = 200.0
+
+
+@configclass
+class TanchoV3StationHopKd1PlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
+    pass
