@@ -54,6 +54,7 @@ parser.add_argument("--motors", choices=["implicit", "explicit"], default="impli
                     help="implicit: MuJoCo servos (Kd integrated implicitly, like Isaac); explicit: tau computed every 1 ms")
 parser.add_argument("--friction", type=float, default=FRICTION, help="tire / floor friction (Isaac nominal 0.8 x 0.8)")
 parser.add_argument("--init-pitch-deg", type=float, default=0.0, help="initial body pitch offset (deg)")
+parser.add_argument("--video", action="store_true", help="write <output-dir>/mujoco.mp4 (run with MUJOCO_GL=egl)")
 parser.add_argument("--dt", type=float, default=0.001, help="MuJoCo physics step (Isaac: 0.005)")
 parser.add_argument("--wheel-kd", type=float, default=4.0, help="wheel velocity-loop Kd (StationV4: 1.0)")
 parser.add_argument("--noslip", type=int, default=10, help="MuJoCo noslip_iterations (0 = MuJoCo default)")
@@ -91,6 +92,13 @@ def build_model() -> mujoco.MjModel:
             g.type = mujoco.mjtGeom.mjGEOM_SPHERE
             g.size = [WHEEL_R, 0, 0]
     floor.contype, floor.conaffinity = 1, 2
+    # Video only: brighter scene (the URDF's visual meshes are discarded, collision shapes are drawn).
+    spec.visual.headlight.ambient = [0.45, 0.45, 0.45]
+    spec.visual.headlight.diffuse = [0.6, 0.6, 0.6]
+    floor.rgba = [0.75, 0.78, 0.8, 1.0]
+    for g in spec.geoms:
+        if g is not floor:
+            g.rgba = [0.15, 0.15, 0.15, 1.0] if g.name.endswith("tire_collision") else [0.35, 0.55, 0.85, 1.0]
     for j in ACT_JOINTS:
         a = spec.add_actuator()
         a.target = j
@@ -241,6 +249,13 @@ p0 = pitch_deg(data.qpos[3:7])
 steps = math.ceil(args.duration / (DT * SUB))
 push_step = round(args.push_time / (DT * SUB)) if args.push_vel > 0 else None
 rows, fell_at, sat = [], None, []
+frames = []
+if args.video:
+    renderer = mujoco.Renderer(model, 480, 640)
+    cam = mujoco.MjvCamera()
+    cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+    cam.trackbodyid = 1
+    cam.distance, cam.azimuth, cam.elevation = 1.1, 135.0, -12.0
 for k in range(steps):
     if push_step is not None and k == push_step:
         R = quat_to_mat(data.qpos[3:7])
@@ -273,6 +288,9 @@ for k in range(steps):
         if args.motors == "implicit":
             nsat += int(sum(abs(data.actuator_force[4 + w]) >= 0.95 * WHEEL_TAU for w in range(2)))
     sat.append(nsat / (2 * SUB))
+    if args.video:
+        renderer.update_scene(data, camera=cam)
+        frames.append(renderer.render().copy())
     t = (k + 1) * DT * SUB
     p = pitch_deg(data.qpos[3:7])
     disp = float(np.linalg.norm(data.qpos[0:2] - xy0))
@@ -300,6 +318,9 @@ summary["pass_no_fall"] = fell_at is None
 summary["pass_drift"] = summary["pre_push_max_drift_m"] < 0.05
 summary["pass_all"] = summary["pass_no_fall"] and summary["pass_drift"] and (push_step is None or rows[-1]["speed_m_s"] < 0.05)
 args.output_dir.mkdir(parents=True, exist_ok=True)
+if frames:
+    import imageio
+    imageio.mimsave(args.output_dir / "mujoco.mp4", frames, fps=50)
 (args.output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
 with open(args.output_dir / "trace.csv", "w") as f:
     f.write(",".join(rows[0]) + "\n")
