@@ -52,6 +52,8 @@ parser.add_argument("--charge-jump", type=int, default=1, help="0: released crou
 parser.add_argument("--output-dir", type=Path, required=True)
 parser.add_argument("--motors", choices=["implicit", "explicit"], default="implicit",
                     help="implicit: MuJoCo servos (Kd integrated implicitly, like Isaac); explicit: tau computed every 1 ms")
+parser.add_argument("--friction", type=float, default=FRICTION, help="tire / floor friction (Isaac nominal 0.8 x 0.8)")
+parser.add_argument("--init-pitch-deg", type=float, default=0.0, help="initial body pitch offset (deg)")
 parser.add_argument("--dt", type=float, default=0.001, help="MuJoCo physics step (Isaac: 0.005)")
 parser.add_argument("--wheel-kd", type=float, default=4.0, help="wheel velocity-loop Kd (StationV4: 1.0)")
 parser.add_argument("--noslip", type=int, default=10, help="MuJoCo noslip_iterations (0 = MuJoCo default)")
@@ -82,7 +84,7 @@ def build_model() -> mujoco.MjModel:
     floor.size = [20, 20, 0.1]
     # Robot geoms touch only the floor (Isaac: no self-collision).
     for g in spec.geoms:
-        g.friction = [FRICTION, 0.005, 0.0001]
+        g.friction = [args.friction, 0.005, 0.0001]
         g.contype, g.conaffinity = 2, 1
         g.solref = [args.solref, 1.0]
         if args.tire == "sphere" and g.name.endswith("tire_collision"):
@@ -123,6 +125,9 @@ qadr = {n: model.jnt_qposadr[i] for n, i in jid.items()}
 vadr = {n: model.jnt_dofadr[i] for n, i in jid.items()}
 for n, q in DEFAULT.items():
     data.qpos[qadr[n]] = q
+if args.init_pitch_deg:
+    h = math.radians(args.init_pitch_deg) / 2  # about world y (+ nose down)
+    data.qpos[3:7] = [math.cos(h), 0.0, math.sin(h), 0.0]
 mujoco.mj_forward(model, data)
 # Put the tires on the floor.
 wheel_bodies = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, b) for b in ("wheel_L", "wheel_R")]
@@ -282,7 +287,7 @@ for k in range(steps):
 pre = [r for r in rows if push_step is None or r["time_s"] < args.push_time]
 summary = {
     "checkpoint": str(args.checkpoint), "engine": f"mujoco {mujoco.__version__}", "obs_dim": obs_dim,
-    "duration_s": args.duration, "presses": args.presses, "tire": args.tire, "motors": args.motors, "noslip": args.noslip, "dt": DT, "wheel_kd": KD_WHEEL, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
+    "duration_s": args.duration, "friction": args.friction, "init_pitch_deg": args.init_pitch_deg, "presses": args.presses, "tire": args.tire, "motors": args.motors, "noslip": args.noslip, "dt": DT, "wheel_kd": KD_WHEEL, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
     "pre_push_max_pitch_dev_deg": max(abs(r["pitch_deg"] - p0) for r in pre),
     "pre_push_max_drift_m": max(r["displacement_m"] for r in pre),
     "max_displacement_m": max(r["displacement_m"] for r in rows),

@@ -223,3 +223,23 @@ class TanchoV3StationSquatKd1ComEnvCfg(TanchoV3StationSquatKd1HoldEnvCfg):
 @configclass
 class TanchoV3StationSquatKd1ComPlayEnvCfg(TanchoV3StationSquatKd1HoldPlayEnvCfg):
     pass
+
+
+# MuJoCo with its default soft contact (solref 0.02) creeps metres and falls even where
+# the stiff-contact check (solref 0.005) passes; a rubber tire is not rigid either.
+# Compliant ground in training: 5000 N/m (13 N per tire -> ~2.6 mm), 120 N s/m
+# (about 0.75 of critical for one tire's share of the mass).
+@configclass
+class TanchoV3StationSquatKd1SoftEnvCfg(TanchoV3StationSquatKd1ComEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        mat = self.scene.terrain.physics_material
+        self.scene.terrain.physics_material = mat.replace(compliant_contact_stiffness=5000.0, compliant_contact_damping=120.0)
+
+
+@configclass
+class TanchoV3StationSquatKd1SoftPlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        mat = self.scene.terrain.physics_material
+        self.scene.terrain.physics_material = mat.replace(compliant_contact_stiffness=5000.0, compliant_contact_damping=120.0)
