@@ -167,7 +167,7 @@ class TanchoV3StationSquatHoldPlayEnvCfg(TanchoV3StationSquatPlayEnvCfg):
 # push, LT / RT / crouch) and never falls in MuJoCo, but drifts 1.7 m there in 60 s:
 # the wheel torque sits at its limit and the tires skid (see station.py round 4).
 # Wheel Kd 4 -> 1 as StationV4.  DEPLOYMENT CHANGE: DM-H3510 MIT-mode kd = 1.0.
-from .station import WHEEL_KD_V4  # noqa: E402
+from .station import WHEEL_KD_V4, position_hold_exp  # noqa: E402
 
 
 def _soft_wheels(cfg):
@@ -187,3 +187,22 @@ class TanchoV3StationSquatKd1PlayEnvCfg(TanchoV3StationSquatHoldPlayEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         _soft_wheels(self)
+
+
+# Kd 1, run 2026-11-19_23-30-07: MuJoCo now close to Isaac (60 s drift 11.8 cm vs
+# 20 cm, wheel torque at the limit 3% of the time, push / LT / RT / crouch no fall),
+# but both creep 3 mm/s while rocking at ~0.06 m/s.  pos_hold (std 5 cm) is flat at
+# 15-20 cm; a second, wider kernel and a stronger L1 pull keep the gradient there.
+@configclass
+class TanchoV3StationSquatKd1HoldEnvCfg(TanchoV3StationSquatKd1EnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        # 20 cm away costs 2/s (was 1).
+        self.rewards.pos_l1.weight = -10.0
+        # std 0.2 m: 20 cm still earns 0.37 of 2/s.
+        self.rewards.pos_hold_wide = RewTerm(func=position_hold_exp, weight=2.0, params={"std": 0.2})
+
+
+@configclass
+class TanchoV3StationSquatKd1HoldPlayEnvCfg(TanchoV3StationSquatKd1PlayEnvCfg):
+    pass
