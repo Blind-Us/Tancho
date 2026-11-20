@@ -25,6 +25,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 
 from .actions import ClimbActionsCfg, FullActionsCfg, WheelOnlyActionsCfg
+from .commands import LowArrowVelocityCommand
 from .observations import ClimbObservationsCfg, FullObservationsCfg, WheelOnlyObservationsCfg
 from .rewards import ClimbRewardsCfg, FullStandRewardsCfg, FullWalkRewardsCfg, WheelOnlyRewardsCfg
 from .scene import FAILURE_TILT_RAD, DECIMATION, EPISODE_LENGTH_S, NOMINAL_FRICTION, SIM_DT_S, ClimbSceneCfg, FullSceneCfg, WheelOnlySceneCfg
@@ -857,4 +858,5 @@ class TanchoV3RoughSquatPlayEnvCfg(TanchoV3DeepSquatPlayEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, "rough", 1.0, size=16.0), max_init_level=None)
+        self.commands.base_velocity.class_type = LowArrowVelocityCommand
         self.commands.base_velocity.debug_vis = True
