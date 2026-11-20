@@ -25,3 +25,32 @@
 `policy.onnx` / `policy.pt`（輸入 [1,34]、輸出 [1,6]，正規化已包在內）、`config.json`、`reference_io.json`（8 組輸入輸出對照）、`reference_lift_table.csv`、`evaluate_stand_mujoco.py`（MuJoCo 驗證腳本，`--wheel-kd 1.0 --charge-jump 0 --presses LT:3,RT:7,CHG:11`）、`eval/`、兩支影片（Isaac 與 MuJoCo 的 LT/RT/蹲下）。
 
 訓練：run `logs/rsl_rl/tancho_v3_station_skills/2026-11-20_04-01-37_5a1086b-dirty`，第 300 iter（同一次訓練的其他 checkpoint 在 MuJoCo 漂 4–41 cm，這個是用 MuJoCo 篩出來的）。
+
+## 重現 / 重新匯出
+
+在 `Tancho_v3_simready/`、conda 環境 `env_isaaclab`（Isaac Lab）下執行。
+
+**直接重新匯出部署檔**（不重訓）：
+```
+python scripts/wheel_only/export_policy.py --headless --task TanchoV3-StationSquatKd1Com-v0 \
+    --checkpoint releases/tancho_v3_squat_kd1_r8_300/train/model_300.pt
+```
+會在 `train/exported/` 產生 `policy.pt` 和 `policy.onnx`。
+
+**重訓這一段**：任務 `TanchoV3-StationSquatKd1Com-v0`，程式在 `source/tancho_v3_lab/tancho_v3_lab/tasks/staged/station_skills.py`。
+```
+python scripts/wheel_only/train.py --headless --task TanchoV3-StationSquatKd1Com-v0 --num_envs 4096 \
+    --max_iterations 1500 --seed 45 --allow-dirty \
+    --init_checkpoint releases/tancho_v3_squat_kd1_r8_300/train/init_checkpoint.pt --keep_obs_norm
+```
+交付版是這次訓練的第 300 iter。PhysX 在 GPU 上不是完全決定性的，重訓的第 300 iter 不保證一模一樣。各 checkpoint 在 MuJoCo 的漂移差很多（2–41 cm），所以要再用篩選腳本挑：
+```
+scripts/wheel_only/screening/candidates.sh <run 資料夾> <標籤> TanchoV3-StationSquatKd1Com-Play-v0 "200 250 300 350 ..."
+scripts/wheel_only/screening/robust.sh <policy.pt> <輸出資料夾>
+```
+
+**`init_checkpoint.pt` 的來源**（各段都已 commit 在 git 裡）：HopCharge（hop r3 + 蹲下）→ StationSkills（補輪里程輸入，`pad_checkpoint_obs.py --actor-at 29 --critic-at 73`）→ StationSquat（拿掉跳）→ StationSquatHold → StationSquatKd1 ×2（輪 Kd 1）→ 動作雜訊重設為 0.03。
+
+**驗收**：
+- Isaac：`scripts/wheel_only/evaluate_stability.py`（60 s 站立 / 推 0.5）、`scripts/wheel_only/evaluate_hop.py --guidance 1 --vx 0 --schedule LT,RT,CHG`
+- MuJoCo：`evaluate_stand_mujoco.py --wheel-kd 1.0 --charge-jump 0`

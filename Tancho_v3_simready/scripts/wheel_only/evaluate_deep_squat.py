@@ -9,6 +9,7 @@ import torch
 from isaaclab_tasks.utils import parse_env_cfg
 import tancho_v3_lab.tasks
 cfg=parse_env_cfg(a.task,device=a.device,num_envs=1)
+cfg.actions.leg_pos.guidance_scale=1.0
 starts=[]; cursor=2.0
 for duration in a.hold_durations:
  starts.append(cursor); cursor+=duration+3.0

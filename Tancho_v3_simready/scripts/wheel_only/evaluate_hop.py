@@ -28,6 +28,8 @@ parser.add_argument("--guidance", type=float, default=0.0)
 parser.add_argument("--vx", type=float, default=0.3)
 parser.add_argument("--repeats", type=int, default=2)
 parser.add_argument("--min-clear", type=float, default=0.02)
+parser.add_argument("--leg-kp", type=float, default=None, help="override the leg PD stiffness (Nm/rad); limits stay")
+parser.add_argument("--leg-kd", type=float, default=None, help="override the leg PD damping (Nm s/rad)")
 parser.add_argument("--charge-s", type=float, default=0.6, help="CHG presses: s the charge button is held (crouch), the jump starts on release")
 parser.add_argument("--min-rise", type=float, default=0.01, help="LT+RT: root must rise this far above its pre-press height while both tires are off the ground (active jump)")
 parser.add_argument("--schedule", default="LT,RT,LT+RT", help="comma-separated presses, repeated --repeats times")
@@ -69,6 +71,10 @@ def main() -> int:
     cfg.commands.climb.random_press_prob = 0.0
     cfg.commands.climb.auto_prob = 0.0
     cfg.actions.leg_pos.guidance_scale = args.guidance
+    if args.leg_kp is not None:
+        cfg.scene.robot.actuators["legs"].stiffness = args.leg_kp
+    if args.leg_kd is not None:
+        cfg.scene.robot.actuators["legs"].damping = args.leg_kd
     if args.ref_style is not None:
         cfg.actions.leg_pos.ref_style = args.ref_style
     if args.terrain == "rough":
@@ -173,6 +179,8 @@ def main() -> int:
     summary = {
         "checkpoint": str(args.checkpoint.resolve()),
         "guidance": args.guidance,
+        "leg_kp": args.leg_kp,
+        "leg_kd": args.leg_kd,
         "vx": args.vx,
         "yaw": args.yaw,
         "gap_s": GAP_S,

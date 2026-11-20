@@ -61,6 +61,10 @@ def pitch_deg(quat_wxyz: torch.Tensor) -> float:
 def main() -> int:
     cfg = parse_env_cfg(args.task, device=args.device, num_envs=1, use_fabric=True)
     cfg.episode_length_s = max(cfg.episode_length_s, args.duration + 1.0)
+    cfg.commands.base_velocity.resampling_time_range = (1.0e6, 1.0e6)
+    cfg.commands.base_velocity.rel_standing_envs = 1.0
+    ranges = cfg.commands.base_velocity.ranges
+    ranges.lin_vel_x = ranges.lin_vel_y = ranges.ang_vel_z = (0.0, 0.0)
     env = gym.make(args.task, cfg=cfg)
     core = env.unwrapped
     robot = core.scene["robot"]

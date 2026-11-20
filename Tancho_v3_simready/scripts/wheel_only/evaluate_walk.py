@@ -56,11 +56,22 @@ VX_TOL = 0.10
 WZ_TOL = 0.20
 STOP_SPEED = 0.05
 MIRROR_RAD = 0.12
+STRAIGHT_LATERAL_LIMIT_M = 0.10
+STRAIGHT_HEADING_LIMIT_DEG = 8.0
 
 
 def pitch_deg(quat_wxyz: torch.Tensor) -> float:
     w, x, y, z = quat_wxyz.tolist()
     return math.degrees(math.asin(max(-1.0, min(1.0, 2.0 * (w * y - z * x)))))
+
+
+def heading_rad(quat_wxyz: torch.Tensor) -> float:
+    w, x, y, z = quat_wxyz.tolist()
+    return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+
+
+def angle_delta_rad(value: float, reference: float) -> float:
+    return math.atan2(math.sin(value - reference), math.cos(value - reference))
 
 
 def main() -> int:
@@ -100,6 +111,9 @@ def main() -> int:
                 "vx_m_s": float(robot.data.root_lin_vel_b[0, 0]),
                 "vy_m_s": float(robot.data.root_lin_vel_b[0, 1]),
                 "wz_rad_s": float(robot.data.root_ang_vel_b[0, 2]),
+                "world_x_m": float(robot.data.root_pos_w[0, 0]),
+                "world_y_m": float(robot.data.root_pos_w[0, 1]),
+                "heading_rad": heading_rad(robot.data.root_quat_w[0]),
                 "pitch_deg": pitch_deg(robot.data.root_quat_w[0]),
                 "base_z_m": float(robot.data.root_pos_w[0, 2]),
                 **{f"{n}_rad": v for n, v in zip(LEG_JOINTS, q)},
@@ -117,6 +131,9 @@ def main() -> int:
             continue
         start = seg[0]["time_s"] - core.step_dt
         steady = [r for r in seg if r["time_s"] - start > args.settle] or seg
+        x0, y0, yaw0 = seg[0]["world_x_m"], seg[0]["world_y_m"], seg[0]["heading_rad"]
+        lateral = [-(r["world_x_m"] - x0) * math.sin(yaw0) + (r["world_y_m"] - y0) * math.cos(yaw0) for r in seg]
+        heading_error = [math.degrees(angle_delta_rad(r["heading_rad"], yaw0)) for r in seg]
         segments[name] = {
             "cmd_vx": vx,
             "cmd_wz": wz,
@@ -125,9 +142,18 @@ def main() -> int:
             "mean_abs_vx_err": sum(abs(r["vx_m_s"] - vx) for r in steady) / len(steady),
             "mean_abs_wz_err": sum(abs(r["wz_rad_s"] - wz) for r in steady) / len(steady),
             "max_abs_pitch_deg": max(abs(r["pitch_deg"]) for r in seg),
+            "end_lateral_offset_m": lateral[-1],
+            "max_abs_lateral_offset_m": max(abs(v) for v in lateral),
+            "max_abs_heading_deviation_deg": max(abs(v) for v in heading_error),
         }
         segments[name]["pass"] = (segments[name]["mean_abs_vx_err"] < VX_TOL
                                   and segments[name]["mean_abs_wz_err"] < WZ_TOL)
+        if wz == 0.0 and vx != 0.0:
+            segments[name]["pass_path"] = (
+                segments[name]["max_abs_lateral_offset_m"] <= STRAIGHT_LATERAL_LIMIT_M
+                and segments[name]["max_abs_heading_deviation_deg"] <= STRAIGHT_HEADING_LIMIT_DEG
+            )
+            segments[name]["pass"] = segments[name]["pass"] and segments[name]["pass_path"]
 
     last = rows[-1]
     mirror = max(abs(last["joint_thigh_L_rad"] - last["joint_thigh_R_rad"]),
