@@ -7,7 +7,7 @@ RUN=$1; LAB=$2; TASK=$3; ITERS=$4
 S=logs/station_20261103/ckpt_scan
 for it in $ITERS; do
   d=$S/${LAB}_$it; mkdir -p $d
-  [ -f $d/exported/policy.pt ] || { cp $RUN/model_$it.pt $d/; timeout -s KILL 600 conda run -n env_isaaclab python scripts/wheel_only/export_policy.py --headless --task $TASK --checkpoint $d/model_$it.pt > $d/export.log 2>&1; }
+  [ -f $d/exported/policy.pt ] || { cp $RUN/model_$it.pt $d/; conda run -n env_isaaclab python scripts/wheel_only/export_policy_cpu.py --checkpoint $d/model_$it.pt > $d/export.log 2>&1; }
   M="nice conda run -n env_isaaclab python -I scripts/wheel_only/evaluate_stand_mujoco.py --checkpoint $d/exported/policy.pt --charge-jump 0 --wheel-kd 1.0 --duration 60"
   $M --output-dir $d/mj_stand60 > /dev/null 2>&1
   for s in 5 -5 8 -8; do $M --slope-deg $s --output-dir $d/mj_slope$s > /dev/null 2>&1; done
