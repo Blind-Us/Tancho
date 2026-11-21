@@ -344,3 +344,18 @@ class TanchoV3StationSquatKd1LatEnvCfg(TanchoV3StationSquatKd1ComEnvCfg):
 @configclass
 class TanchoV3StationSquatKd1LatPlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
     pass
+
+
+# r16_400 (latency 10-20 ms) survives noise + latency everywhere but slides 3.2 m on a
+# +5 deg incline in Isaac.  Same latency range plus the Terrain tiles / steady +/-2 N load.
+@configclass
+class TanchoV3StationSquatKd1LatTerrainEnvCfg(TanchoV3StationSquatKd1TerrainEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.min_delay_substeps = 2
+        self.actions.wheel_vel.min_delay_substeps = 2
+
+
+@configclass
+class TanchoV3StationSquatKd1LatTerrainPlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
+    pass
