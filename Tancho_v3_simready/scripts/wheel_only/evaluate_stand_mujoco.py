@@ -57,6 +57,7 @@ parser.add_argument("--init-pitch-deg", type=float, default=0.0, help="initial b
 parser.add_argument("--video", action="store_true", help="write <output-dir>/mujoco.mp4 (run with MUJOCO_GL=egl)")
 parser.add_argument("--latency-ms", type=int, default=0, help="motor targets take effect this many ms after each policy step")
 parser.add_argument("--obs-noise", action="store_true", help="add the training sensor noise (uniform) to the observation")
+parser.add_argument("--noise-scale", type=float, default=1.0, help="multiplies the --obs-noise amplitudes")
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--slope-deg", type=float, default=0.0, help="emulate an incline by tilting gravity about y (+x downhill)")
 parser.add_argument("--dt", type=float, default=0.001, help="MuJoCo physics step (Isaac: 0.005)")
@@ -262,7 +263,7 @@ rng = np.random.default_rng(args.seed)
 # Training sensor noise (Isaac adds it before the scale): gravity, gyro, wheel speed, leg pos, leg speed.
 NOISE = np.zeros(max(obs_dim, 34), np.float32)
 NOISE[0:3], NOISE[3:6], NOISE[9:11], NOISE[17:21], NOISE[21:25] = 0.02, 0.05 * 0.25, 0.2 * 0.05, 0.01, 0.2 * 0.05
-NOISE = NOISE[:obs_dim]
+NOISE = NOISE[:obs_dim] * args.noise_scale
 LAT_SUB = int(round(args.latency_ms / (DT * 1000)))
 q_prev = v_prev = None
 xy0 = data.qpos[0:2].copy()
@@ -342,7 +343,7 @@ for k in range(steps):
 pre = [r for r in rows if push_step is None or r["time_s"] < args.push_time]
 summary = {
     "checkpoint": str(args.checkpoint), "engine": f"mujoco {mujoco.__version__}", "obs_dim": obs_dim,
-    "duration_s": args.duration, "latency_ms": args.latency_ms, "obs_noise": args.obs_noise, "slope_deg": args.slope_deg, "friction": args.friction, "init_pitch_deg": args.init_pitch_deg, "presses": args.presses, "tire": args.tire, "motors": args.motors, "noslip": args.noslip, "dt": DT, "wheel_kd": KD_WHEEL, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
+    "duration_s": args.duration, "latency_ms": args.latency_ms, "obs_noise": args.obs_noise, "noise_scale": args.noise_scale, "slope_deg": args.slope_deg, "friction": args.friction, "init_pitch_deg": args.init_pitch_deg, "presses": args.presses, "tire": args.tire, "motors": args.motors, "noslip": args.noslip, "dt": DT, "wheel_kd": KD_WHEEL, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
     "pre_push_max_pitch_dev_deg": max(abs(r["pitch_deg"] - p0) for r in pre),
     "pre_push_max_drift_m": max(r["displacement_m"] for r in pre),
     "max_displacement_m": max(r["displacement_m"] for r in rows),
