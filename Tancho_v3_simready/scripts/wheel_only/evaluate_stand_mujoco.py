@@ -262,6 +262,7 @@ p0 = pitch_deg(data.qpos[3:7])
 steps = math.ceil(args.duration / (DT * SUB))
 push_step = round(args.push_time / (DT * SUB)) if args.push_vel > 0 else None
 rows, fell_at, sat = [], None, []
+max_tilt = 0.0
 frames = []
 if args.video:
     renderer = mujoco.Renderer(model, 480, 640)
@@ -321,7 +322,12 @@ for k in range(steps):
                      clear_L_m=float(data.xpos[wheel_bodies[0]][2] - WHEEL_R), clear_R_m=float(data.xpos[wheel_bodies[1]][2] - WHEEL_R)))
     R = quat_to_mat(data.qpos[3:7])
     up = -model.opt.gravity / np.linalg.norm(model.opt.gravity)
-    if math.degrees(math.acos(max(-1.0, min(1.0, float(R[:, 2] @ up))))) > 15.0:
+    # Fall = tilt beyond 15 deg, or 35 deg while a button is (recently) pressed: the
+    # training termination (climb.bad_orientation_gated, 0.6 s after release).
+    tilt_deg = math.degrees(math.acos(max(-1.0, min(1.0, float(R[:, 2] @ up)))))
+    max_tilt = max(max_tilt, tilt_deg)
+    recent = any(t0 <= t < t0 + (args.charge_s if b == "CHG" else args.press_s) + 0.6 for b, t0 in PRESSES)
+    if math.degrees(math.acos(max(-1.0, min(1.0, float(R[:, 2] @ up))))) > (35.0 if recent else 15.0):
         fell_at = t
         break
 
@@ -334,6 +340,7 @@ summary = {
     "max_displacement_m": max(r["displacement_m"] for r in rows),
     "end_displacement_m": rows[-1]["displacement_m"], "end_speed_m_s": rows[-1]["speed_m_s"],
     "wheel_saturation_frac": float(np.mean(sat)),
+    "max_tilt_deg": max_tilt,
     "press_clearance_m": {f"{b}@{t0:g}": [round(max(r[c] for r in rows if t0 <= r["time_s"] < t0 + 1.0), 4) if any(t0 <= r["time_s"] < t0 + 1.0 for r in rows) else None
                                          for c in ("clear_L_m", "clear_R_m")] for b, t0 in PRESSES},
 }

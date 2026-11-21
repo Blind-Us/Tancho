@@ -15,5 +15,6 @@ for f in sorted(glob.glob(sys.argv[1] + "/*/summary.json")):
     s = json.load(open(f)); rows.append((os.path.basename(os.path.dirname(f)), s["fell_at_s"], s["pre_push_max_drift_m"]))
 falls = [r[0] for r in rows if r[1] is not None]
 stand = max(r[2] for r in rows if r[0].startswith("stand"))
-print(os.path.basename(sys.argv[1]), "falls", falls, "worst stand drift", round(stand, 3), " ".join(f"{n}={'FELL' if fl else round(d, 3)}" for n, fl, d in rows))
+tilt = max(json.load(open(f))["max_tilt_deg"] for f in glob.glob(sys.argv[1] + "/presses*/summary.json"))
+print(os.path.basename(sys.argv[1]), "falls", falls, "worst stand drift", round(stand, 3), "max press tilt", round(tilt, 1), " ".join(f"{n}={'FELL' if fl else round(d, 3)}" for n, fl, d in rows))
 P

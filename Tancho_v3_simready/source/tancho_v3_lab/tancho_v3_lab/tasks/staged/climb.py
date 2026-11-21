@@ -679,6 +679,18 @@ class _DelayMixin:
         ids = slice(None) if env_ids is None else env_ids
         k = self.num_envs if env_ids is None else len(env_ids)
         self._delay[ids] = torch.randint(self.cfg.min_delay_substeps, self.cfg.max_delay_substeps + 1, (k, 1), device=self.device)
+        if getattr(self, "_fresh", None) is not None:
+            self._fresh[ids] = True
+
+    def _fresh_prev(self):
+        """After a reset there is no previous command: hold the new one (the processed
+        actions are 0 before the first step, i.e. leg targets of 0 rad, not the nominal pose)."""
+        fresh = getattr(self, "_fresh", None)
+        if fresh is None:
+            self._prev_target = self._processed_actions.clone()
+        elif fresh.any():
+            self._prev_target[fresh] = self._processed_actions[fresh]
+        self._fresh = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
     def _delayed_target(self) -> torch.Tensor:
         cur = self.processed_actions
@@ -693,6 +705,7 @@ class ClimbLegActionDelayed(_DelayMixin, ClimbLegAction):
             self._delay_reset(None)
         self._prev_target = self._processed_actions.clone()
         super().process_actions(actions)
+        self._fresh_prev()
         self._substep = 0
 
     def apply_actions(self):
@@ -717,6 +730,7 @@ class JointVelocityActionDelayed(_DelayMixin, mdp.JointVelocityAction):
             self._delay_reset(None)
         self._prev_target = self._processed_actions.clone()
         super().process_actions(actions)
+        self._fresh_prev()
         self._substep = 0
 
     def apply_actions(self):
