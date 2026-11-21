@@ -283,9 +283,10 @@ class TanchoV3StationHopKd1PlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
 # tilted 5-8 deg) it creeps 7-53 cm in Isaac and 0.4-1.8 m in MuJoCo.  Holding still on
 # a slope needs a steady wheel torque the policy never had to find on flat ground.
 # * Ground: HOP generator tiles (half flat, half 0-2 cm bumps), all levels, no curriculum.
-# * A constant horizontal force on the body per episode, body x U(-4, 4) N (2.6 kg on an
-#   8 deg incline: 3.6 N), 30% of episodes none: the steady load of a slope / of a COM
-#   offset, without tilting the ground.
+# * A constant horizontal force on the body per episode, body x U(-2, 2) N (2.6 kg on a
+#   4.5 deg incline), half of the episodes none: the steady load of a slope / of a COM
+#   offset, without tilting the ground.  (+/-4 N, 30% none: time-outs fell from 49% at
+#   iteration 50 to 20% at 300, 78% tilt; stopped.)
 import torch  # noqa: E402
 from isaaclab.envs import ManagerBasedEnv  # noqa: E402
 from isaaclab.managers import EventTermCfg as EventTerm  # noqa: E402
@@ -317,7 +318,7 @@ class TanchoV3StationSquatKd1TerrainEnvCfg(TanchoV3StationSquatKd1ComEnvCfg):
         self.scene.terrain = make_terrain(HOP_GENERATOR, max_init_level=None)
         self.events.slope_load = EventTerm(
             func=constant_body_push, mode="reset",
-            params={"max_force": 4.0, "none_share": 0.3,
+            params={"max_force": 2.0, "none_share": 0.5,
                     "asset_cfg": SceneEntityCfg("robot", body_names=["base_link_root"])},
         )
 
