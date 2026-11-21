@@ -1,0 +1,56 @@
+{
+  "checkpoint": "logs/station_20261103/ckpt_scan/r16_400/exported/policy.pt",
+  "engine": "mujoco 3.13.0",
+  "obs_dim": 34,
+  "duration_s": 30.0,
+  "latency_ms": 20,
+  "obs_noise": true,
+  "slope_deg": 0.0,
+  "friction": 0.64,
+  "init_pitch_deg": 0.0,
+  "presses": "LT:3,RT:7,CHG:11,LT:15,RT:19,CHG:23",
+  "tire": "cylinder",
+  "motors": "implicit",
+  "noslip": 10,
+  "dt": 0.001,
+  "wheel_kd": 1.0,
+  "solref": 0.005,
+  "push_vel_m_s": 0.0,
+  "fell_at_s": null,
+  "pre_push_max_pitch_dev_deg": 12.660930660780137,
+  "pre_push_max_drift_m": 0.08470109800058,
+  "max_displacement_m": 0.08470109800058,
+  "end_displacement_m": 0.08470109800058,
+  "end_speed_m_s": 0.04063378020819598,
+  "wheel_saturation_frac": 0.3897333333333334,
+  "max_tilt_deg": 12.667765899741477,
+  "press_clearance_m": {
+    "LT@3": [
+      0.0459,
+      0.0046
+    ],
+    "RT@7": [
+      0.0034,
+      0.0441
+    ],
+    "CHG@11": [
+      0.0002,
+      0.0
+    ],
+    "LT@15": [
+      0.0447,
+      0.0028
+    ],
+    "RT@19": [
+      0.0053,
+      0.0456
+    ],
+    "CHG@23": [
+      0.0002,
+      0.0001
+    ]
+  },
+  "pass_no_fall": true,
+  "pass_drift": false,
+  "pass_all": false
+}
