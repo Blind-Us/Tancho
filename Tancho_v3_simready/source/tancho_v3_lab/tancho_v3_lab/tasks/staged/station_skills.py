@@ -429,3 +429,12 @@ class TanchoV3StationIntPlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.observations.policy.enable_corruption = False
+
+
+# StationInt with the +/-2 N load sat at 35-41% time-outs to iteration 600 (r16 without
+# the load: ~69%), mostly tilt during presses.  The integral alone, no steady load:
+@configclass
+class TanchoV3StationIntNoLoadEnvCfg(TanchoV3StationIntEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.events.slope_load = None

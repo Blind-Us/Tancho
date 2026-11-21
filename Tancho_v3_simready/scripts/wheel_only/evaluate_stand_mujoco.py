@@ -150,7 +150,7 @@ mujoco.mj_forward(model, data)
 
 policy = torch.jit.load(str(args.checkpoint), map_location="cpu").eval()
 obs_dim = None
-for n_in in (34, 32, 31, 29):
+for n_in in (36, 34, 32, 31, 29):
     try:
         with torch.no_grad():
             policy(torch.zeros(1, n_in))
@@ -158,7 +158,7 @@ for n_in in (34, 32, 31, 29):
         break
     except Exception:
         continue
-assert obs_dim in (29, 31, 32, 34), f"unsupported policy input size {obs_dim}"
+assert obs_dim in (29, 31, 32, 34, 36), f"unsupported policy input size {obs_dim}"
 
 RX_T = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float64)  # body -> IMU (+90 deg about x)
 
@@ -174,6 +174,9 @@ def pitch_deg(q):
     return math.degrees(math.asin(max(-1.0, min(1.0, 2 * (w * y - z * x)))))
 
 
+odom_int = np.zeros(2)
+
+
 def build_obs(last_action):
     R = quat_to_mat(data.qpos[3:7])
     g_b = R.T @ (model.opt.gravity / np.linalg.norm(model.opt.gravity))
@@ -185,10 +188,15 @@ def build_obs(last_action):
     o.append(0.05 * np.array([data.qvel[vadr[j]] for j in LEGS]))
     o.append(trig.copy())  # LT / RT held
     o.append(np.minimum(phase, 0.6) / 0.6)
-    if obs_dim in (31, 34):
-        o.append(2.0 * np.clip(WHEEL_R * np.array([data.qpos[qadr[j]] for j in WHEELS]), -0.5, 0.5))
-    if obs_dim in (32, 34):
+    odom = np.clip(WHEEL_R * np.array([data.qpos[qadr[j]] for j in WHEELS]), -0.5, 0.5)
+    if obs_dim in (31, 34, 36):
+        o.append(2.0 * odom)
+    if obs_dim in (32, 34, 36):
         o.append(np.array([chg_held, chg_level, min(chg_phase, 0.6) / 0.6]))
+    if obs_dim == 36:
+        # StationInt: leaky odometry integral, tau 5 s, +/-0.25 m s, x4 (updated once per policy step).
+        odom_int[:] = np.clip(odom_int * (1.0 - 0.02 / 5.0) + odom * 0.02, -0.25, 0.25)
+        o.append(4.0 * odom_int)
     return np.concatenate(o).astype(np.float32)
 
 
@@ -252,7 +260,7 @@ def update_buttons(t):
 last = np.zeros(6, dtype=np.float32)
 rng = np.random.default_rng(args.seed)
 # Training sensor noise (Isaac adds it before the scale): gravity, gyro, wheel speed, leg pos, leg speed.
-NOISE = np.zeros(34 if obs_dim >= 32 else obs_dim, np.float32)
+NOISE = np.zeros(max(obs_dim, 34), np.float32)
 NOISE[0:3], NOISE[3:6], NOISE[9:11], NOISE[17:21], NOISE[21:25] = 0.02, 0.05 * 0.25, 0.2 * 0.05, 0.01, 0.2 * 0.05
 NOISE = NOISE[:obs_dim]
 LAT_SUB = int(round(args.latency_ms / (DT * 1000)))
@@ -284,7 +292,7 @@ for k in range(steps):
     a = np.clip(a, -1.0, 1.0)
     last = a.astype(np.float32)
     off = np.concatenate([lift_offset(phase[0]), lift_offset(phase[1])])
-    if obs_dim in (32, 34):
+    if obs_dim in (32, 34, 36):
         off = off + np.tile(charge_offset(), 2)
     q_t = {j: DEFAULT[j] + LEG_SCALE * a[i] + off[i] for i, j in enumerate(LEGS)}
     v_t = {j: WHEEL_SCALE * a[4 + i] for i, j in enumerate(WHEELS)}
