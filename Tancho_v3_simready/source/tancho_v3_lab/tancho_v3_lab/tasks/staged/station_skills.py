@@ -461,3 +461,13 @@ class TanchoV3StationSquatKd1PushEnvCfg(TanchoV3StationSquatKd1LatEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.events.push_robot.interval_range_s = (1.5, 3.0)
+
+
+# Kicks every 1.5-3 s (Kd1Push) cut the MuJoCo push-in-press falls from 4.8% to ~3.5% but
+# its checkpoints fell standing in Isaac (noise + 20 ms, 2 of 4 at iteration 400).  A middle
+# setting, 2-4 s, from r16_400, short run screened every 50 iterations.
+@configclass
+class TanchoV3StationSquatKd1Push2EnvCfg(TanchoV3StationSquatKd1LatEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.events.push_robot.interval_range_s = (2.0, 4.0)
