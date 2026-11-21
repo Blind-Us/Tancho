@@ -326,3 +326,21 @@ class TanchoV3StationSquatKd1TerrainEnvCfg(TanchoV3StationSquatKd1ComEnvCfg):
 @configclass
 class TanchoV3StationSquatKd1TerrainPlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
     """Flat Play tile, no steady load (scripts set terrain / incline themselves)."""
+
+
+# Deployment stress (MuJoCo, training sensor noise + 20 ms motor latency): release r8_300
+# fell in 2 of 3 LT / RT / crouch rounds and drifted 35-43 cm standing; r8_700 never fell
+# (8-20 cm).  The 2.4 cm of r8_300 held only without noise and latency.  Latency in
+# training 0-20 ms -> 10-20 ms (the real Pi -> CAN -> motor path is not instantaneous);
+# from r8_700.
+@configclass
+class TanchoV3StationSquatKd1LatEnvCfg(TanchoV3StationSquatKd1ComEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.leg_pos.min_delay_substeps = 2
+        self.actions.wheel_vel.min_delay_substeps = 2
+
+
+@configclass
+class TanchoV3StationSquatKd1LatPlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
+    pass

@@ -55,6 +55,9 @@ parser.add_argument("--motors", choices=["implicit", "explicit"], default="impli
 parser.add_argument("--friction", type=float, default=FRICTION, help="tire / floor friction (Isaac nominal 0.8 x 0.8)")
 parser.add_argument("--init-pitch-deg", type=float, default=0.0, help="initial body pitch offset (deg)")
 parser.add_argument("--video", action="store_true", help="write <output-dir>/mujoco.mp4 (run with MUJOCO_GL=egl)")
+parser.add_argument("--latency-ms", type=int, default=0, help="motor targets take effect this many ms after each policy step")
+parser.add_argument("--obs-noise", action="store_true", help="add the training sensor noise (uniform) to the observation")
+parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--slope-deg", type=float, default=0.0, help="emulate an incline by tilting gravity about y (+x downhill)")
 parser.add_argument("--dt", type=float, default=0.001, help="MuJoCo physics step (Isaac: 0.005)")
 parser.add_argument("--wheel-kd", type=float, default=4.0, help="wheel velocity-loop Kd (StationV4: 1.0)")
@@ -247,6 +250,13 @@ def update_buttons(t):
 
 
 last = np.zeros(6, dtype=np.float32)
+rng = np.random.default_rng(args.seed)
+# Training sensor noise (Isaac adds it before the scale): gravity, gyro, wheel speed, leg pos, leg speed.
+NOISE = np.zeros(34 if obs_dim >= 32 else obs_dim, np.float32)
+NOISE[0:3], NOISE[3:6], NOISE[9:11], NOISE[17:21], NOISE[21:25] = 0.02, 0.05 * 0.25, 0.2 * 0.05, 0.01, 0.2 * 0.05
+NOISE = NOISE[:obs_dim]
+LAT_SUB = int(round(args.latency_ms / (DT * 1000)))
+q_prev = v_prev = None
 xy0 = data.qpos[0:2].copy()
 p0 = pitch_deg(data.qpos[3:7])
 steps = math.ceil(args.duration / (DT * SUB))
@@ -266,7 +276,10 @@ for k in range(steps):
         data.qvel[0:2] += args.push_vel * fwd[:2]
     update_buttons(k * DT * SUB)
     with torch.no_grad():
-        a = policy(torch.from_numpy(build_obs(last)).unsqueeze(0))[0].numpy()
+        o = build_obs(last)
+        if args.obs_noise:
+            o = o + rng.uniform(-NOISE, NOISE).astype(np.float32)
+        a = policy(torch.from_numpy(o).unsqueeze(0))[0].numpy()
     a = np.clip(a, -1.0, 1.0)
     last = a.astype(np.float32)
     off = np.concatenate([lift_offset(phase[0]), lift_offset(phase[1])])
@@ -275,7 +288,12 @@ for k in range(steps):
     q_t = {j: DEFAULT[j] + LEG_SCALE * a[i] + off[i] for i, j in enumerate(LEGS)}
     v_t = {j: WHEEL_SCALE * a[4 + i] for i, j in enumerate(WHEELS)}
     nsat = 0
-    for _ in range(SUB):
+    q_new, v_new = q_t, v_t
+    for sub in range(SUB):
+        if q_prev is not None and sub < LAT_SUB:
+            q_t, v_t = q_prev, v_prev
+        else:
+            q_t, v_t = q_new, v_new
         for i, j in enumerate(ACT_JOINTS):
             q, qd = data.qpos[qadr[j]], data.qvel[vadr[j]]
             if j in q_t:
@@ -290,6 +308,7 @@ for k in range(steps):
         mujoco.mj_step(model, data)
         if args.motors == "implicit":
             nsat += int(sum(abs(data.actuator_force[4 + w]) >= 0.95 * WHEEL_TAU for w in range(2)))
+    q_prev, v_prev = q_new, v_new
     sat.append(nsat / (2 * SUB))
     if args.video:
         renderer.update_scene(data, camera=cam)
@@ -309,7 +328,7 @@ for k in range(steps):
 pre = [r for r in rows if push_step is None or r["time_s"] < args.push_time]
 summary = {
     "checkpoint": str(args.checkpoint), "engine": f"mujoco {mujoco.__version__}", "obs_dim": obs_dim,
-    "duration_s": args.duration, "slope_deg": args.slope_deg, "friction": args.friction, "init_pitch_deg": args.init_pitch_deg, "presses": args.presses, "tire": args.tire, "motors": args.motors, "noslip": args.noslip, "dt": DT, "wheel_kd": KD_WHEEL, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
+    "duration_s": args.duration, "latency_ms": args.latency_ms, "obs_noise": args.obs_noise, "slope_deg": args.slope_deg, "friction": args.friction, "init_pitch_deg": args.init_pitch_deg, "presses": args.presses, "tire": args.tire, "motors": args.motors, "noslip": args.noslip, "dt": DT, "wheel_kd": KD_WHEEL, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
     "pre_push_max_pitch_dev_deg": max(abs(r["pitch_deg"] - p0) for r in pre),
     "pre_push_max_drift_m": max(r["displacement_m"] for r in pre),
     "max_displacement_m": max(r["displacement_m"] for r in rows),

@@ -36,6 +36,8 @@ parser.add_argument("--push-vel", type=float, default=0.5)
 parser.add_argument("--output-dir", type=Path, default=None)
 parser.add_argument("--terrain", choices=["default", "flat", "rough"], default="default", help="rough: one tile of 0-2 cm bumps at --difficulty")
 parser.add_argument("--difficulty", type=float, default=1.0)
+parser.add_argument("--latency-substeps", type=int, default=0, help="hold the previous motor targets for this many 5 ms physics substeps after each policy step (fixed delay)")
+parser.add_argument("--obs-noise", action="store_true", help="keep the training sensor noise on the actor observation")
 parser.add_argument("--slope-deg", type=float, default=0.0, help="emulate an incline by tilting gravity about y (+: nose-down side downhill = facing downhill)")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
@@ -67,6 +69,11 @@ def main() -> int:
     if args.terrain != "default":
         from tancho_v3_lab.tasks.staged.terrain import HOP_GENERATOR, make_terrain, play_generator
         cfg.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, args.terrain, args.difficulty, size=16.0), max_init_level=None)
+    if args.latency_substeps:
+        for term in (cfg.actions.leg_pos, cfg.actions.wheel_vel):
+            term.min_delay_substeps = term.max_delay_substeps = args.latency_substeps
+    if args.obs_noise:
+        cfg.observations.policy.enable_corruption = True
     if args.slope_deg:
         a = math.radians(args.slope_deg)
         cfg.sim.gravity = (9.81 * math.sin(a), 0.0, -9.81 * math.cos(a))

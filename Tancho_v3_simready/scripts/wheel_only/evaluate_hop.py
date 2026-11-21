@@ -32,6 +32,8 @@ parser.add_argument("--leg-kp", type=float, default=None, help="override the leg
 parser.add_argument("--leg-kd", type=float, default=None, help="override the leg PD damping (Nm s/rad)")
 parser.add_argument("--charge-s", type=float, default=0.6, help="CHG presses: s the charge button is held (crouch), the jump starts on release")
 parser.add_argument("--min-rise", type=float, default=0.01, help="LT+RT: root must rise this far above its pre-press height while both tires are off the ground (active jump)")
+parser.add_argument("--latency-substeps", type=int, default=0, help="hold the previous motor targets for this many 5 ms substeps after each policy step")
+parser.add_argument("--obs-noise", action="store_true", help="keep the training sensor noise on the actor observation")
 parser.add_argument("--schedule", default="LT,RT,LT+RT", help="comma-separated presses, repeated --repeats times")
 parser.add_argument("--gap", type=float, default=3.0, help="s between rising edges (double jump: < 1)")
 parser.add_argument("--press-s", type=float, default=0.4, help="s each trigger is held")
@@ -75,6 +77,11 @@ def main() -> int:
         cfg.scene.robot.actuators["legs"].stiffness = args.leg_kp
     if args.leg_kd is not None:
         cfg.scene.robot.actuators["legs"].damping = args.leg_kd
+    if args.latency_substeps:
+        for term in (cfg.actions.leg_pos, cfg.actions.wheel_vel):
+            term.min_delay_substeps = term.max_delay_substeps = args.latency_substeps
+    if args.obs_noise:
+        cfg.observations.policy.enable_corruption = True
     if args.ref_style is not None:
         cfg.actions.leg_pos.ref_style = args.ref_style
     if args.terrain == "rough":
