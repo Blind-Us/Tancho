@@ -48,6 +48,7 @@ parser.add_argument("--push-vel", type=float, default=0.0)
 parser.add_argument("--presses", default="", help="e.g. 'LT:3,RT:6,LT+RT:9,CHG:12' (button:start s); LT/RT held --press-s, CHG held --charge-s")
 parser.add_argument("--press-s", type=float, default=0.4)
 parser.add_argument("--charge-s", type=float, default=0.6)
+parser.add_argument("--charge-cooldown", type=float, default=0.0, help="ignore a crouch press until this long after the last release (s); 0.3 = the stand-up is over")
 parser.add_argument("--charge-jump", type=int, default=1, help="0: released crouch stands back up (StationSquat), 1: charged hop (HopCharge)")
 parser.add_argument("--output-dir", type=Path, required=True)
 parser.add_argument("--motors", choices=["implicit", "explicit"], default="implicit",
@@ -250,6 +251,8 @@ def update_buttons(t):
     rising = (new > 0) & (trig <= 0) & (phase >= 0.399)
     phase = np.where(rising, 0.0, phase + 0.02)
     trig = new
+    if new_chg > 0 and chg_held <= 0 and chg_phase < args.charge_cooldown:
+        new_chg = 0.0  # Pi rule: a new crouch waits until the previous stand-up has finished
     released = new_chg <= 0 and chg_held > 0
     if released:
         chg_release_level = chg_level
@@ -269,7 +272,7 @@ q_prev = v_prev = None
 xy0 = data.qpos[0:2].copy()
 p0 = pitch_deg(data.qpos[3:7])
 steps = math.ceil(args.duration / (DT * SUB))
-push_step = round(args.push_time / (DT * SUB)) if args.push_vel > 0 else None
+push_step = round(args.push_time / (DT * SUB)) if args.push_vel != 0 else None
 rows, fell_at, sat = [], None, []
 max_tilt = 0.0
 frames = []

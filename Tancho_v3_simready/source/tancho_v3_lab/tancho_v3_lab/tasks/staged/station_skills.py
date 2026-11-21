@@ -451,3 +451,13 @@ class TanchoV3StationSquatKd1QuietTorqueEnvCfg(TanchoV3StationSquatKd1LatEnvCfg)
         super().__post_init__()
         self.rewards.wheel_saturation.weight *= 10.0
         self.rewards.wheel_torque.weight *= 5.0
+
+
+# MuJoCo press sweep with a random +/-0.5 m/s kick inside the sequence: r16_400 falls in
+# 48 / 990 (4.8%), mostly with a leg lifted.  Kicks every 1.5-3 s instead of 3-6 s, so a
+# kick lands during a lift / crouch far more often; from r16_400.
+@configclass
+class TanchoV3StationSquatKd1PushEnvCfg(TanchoV3StationSquatKd1LatEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.events.push_robot.interval_range_s = (1.5, 3.0)

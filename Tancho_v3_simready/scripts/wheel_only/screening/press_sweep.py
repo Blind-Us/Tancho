@@ -15,6 +15,7 @@ ap.add_argument("--checkpoint", required=True)
 ap.add_argument("--out", required=True)
 ap.add_argument("--jobs", type=int, default=12)
 ap.add_argument("--n", type=int, default=240, help="number of sequences (random sample of the grid)")
+ap.add_argument("--push", type=float, default=0.0, help="also kick the body by this speed (m/s, forward or back) at a random time inside the sequence")
 ap.add_argument("--extra", default="--wheel-kd 1.0 --charge-jump 0", help="extra harness arguments")
 args = ap.parse_args()
 root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
@@ -37,9 +38,13 @@ def run(i, item):
         t += (hold if b != "CHG" else max(hold, 0.4)) + gap
     dur = t + 4.0
     d = os.path.join(args.out, f"{i:04d}")
+    push = []
+    if args.push:
+        r = random.Random(i)
+        push = ["--push-vel", f"{args.push * r.choice([-1, 1]):.2f}", "--push-time", f"{r.uniform(2.0, t):.2f}"]
     cmd = [sys.executable, "-I", os.path.join(root, "scripts/wheel_only/evaluate_stand_mujoco.py"), "--checkpoint", args.checkpoint,
            "--obs-noise", "--latency-ms", str(lat), "--seed", str(seed), "--duration", f"{dur:.2f}", "--presses", ",".join(presses),
-           "--press-s", str(hold), "--charge-s", str(max(hold, 0.4)), "--output-dir", d] + args.extra.split()
+           "--press-s", str(hold), "--charge-s", str(max(hold, 0.4)), "--output-dir", d] + push + args.extra.split()
     subprocess.run(cmd, cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         s = json.load(open(os.path.join(d, "summary.json")))
