@@ -34,6 +34,9 @@ parser.add_argument("--duration", type=float, default=20.0)
 parser.add_argument("--push-time", type=float, default=10.0)
 parser.add_argument("--push-vel", type=float, default=0.5)
 parser.add_argument("--output-dir", type=Path, default=None)
+parser.add_argument("--terrain", choices=["default", "flat", "rough"], default="default", help="rough: one tile of 0-2 cm bumps at --difficulty")
+parser.add_argument("--difficulty", type=float, default=1.0)
+parser.add_argument("--slope-deg", type=float, default=0.0, help="emulate an incline by tilting gravity about y (+: nose-down side downhill = facing downhill)")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 simulation_app = AppLauncher(args).app
@@ -61,6 +64,12 @@ def pitch_deg(quat_wxyz: torch.Tensor) -> float:
 def main() -> int:
     cfg = parse_env_cfg(args.task, device=args.device, num_envs=1, use_fabric=True)
     cfg.episode_length_s = max(cfg.episode_length_s, args.duration + 1.0)
+    if args.terrain != "default":
+        from tancho_v3_lab.tasks.staged.terrain import HOP_GENERATOR, make_terrain, play_generator
+        cfg.scene.terrain = make_terrain(play_generator(HOP_GENERATOR, args.terrain, args.difficulty, size=16.0), max_init_level=None)
+    if args.slope_deg:
+        a = math.radians(args.slope_deg)
+        cfg.sim.gravity = (9.81 * math.sin(a), 0.0, -9.81 * math.cos(a))
     cfg.commands.base_velocity.resampling_time_range = (1.0e6, 1.0e6)
     cfg.commands.base_velocity.rel_standing_envs = 1.0
     ranges = cfg.commands.base_velocity.ranges

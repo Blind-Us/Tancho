@@ -276,3 +276,52 @@ class TanchoV3StationHopKd1EnvCfg(TanchoV3StationSquatKd1ComEnvCfg):
 @configclass
 class TanchoV3StationHopKd1PlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
     pass
+
+
+# -- terrain and steady loads (user 2026-11-21: stability + terrain first) -----------
+# Release r8_300: 0-2 cm bumps hold 3-8 cm without a fall, but on an incline (gravity
+# tilted 5-8 deg) it creeps 7-53 cm in Isaac and 0.4-1.8 m in MuJoCo.  Holding still on
+# a slope needs a steady wheel torque the policy never had to find on flat ground.
+# * Ground: HOP generator tiles (half flat, half 0-2 cm bumps), all levels, no curriculum.
+# * A constant horizontal force on the body per episode, body x U(-4, 4) N (2.6 kg on an
+#   8 deg incline: 3.6 N), 30% of episodes none: the steady load of a slope / of a COM
+#   offset, without tilting the ground.
+import torch  # noqa: E402
+from isaaclab.envs import ManagerBasedEnv  # noqa: E402
+from isaaclab.managers import EventTermCfg as EventTerm  # noqa: E402
+from isaaclab.managers import SceneEntityCfg  # noqa: E402
+
+from .terrain import HOP_GENERATOR, make_terrain  # noqa: E402
+
+
+def constant_body_push(env: ManagerBasedEnv, env_ids: torch.Tensor, max_force: float, none_share: float,
+                       asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names=["base_link_root"])):
+    """Per episode, a constant force along body x on ``asset_cfg``'s body (0 for ``none_share`` of the envs)."""
+    asset = env.scene[asset_cfg.name]
+    if env_ids is None:
+        env_ids = torch.arange(env.scene.num_envs, device=asset.device)
+    n = len(env_ids)
+    fx = torch.empty(n, device=asset.device).uniform_(-max_force, max_force)
+    fx = torch.where(torch.rand(n, device=asset.device) < none_share, torch.zeros_like(fx), fx)
+    forces = torch.zeros(n, len(asset_cfg.body_ids), 3, device=asset.device)
+    forces[:, :, 0] = fx.unsqueeze(1)
+    asset.permanent_wrench_composer.set_forces_and_torques(
+        forces=forces, torques=torch.zeros_like(forces), body_ids=asset_cfg.body_ids, env_ids=env_ids
+    )
+
+
+@configclass
+class TanchoV3StationSquatKd1TerrainEnvCfg(TanchoV3StationSquatKd1ComEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain = make_terrain(HOP_GENERATOR, max_init_level=None)
+        self.events.slope_load = EventTerm(
+            func=constant_body_push, mode="reset",
+            params={"max_force": 4.0, "none_share": 0.3,
+                    "asset_cfg": SceneEntityCfg("robot", body_names=["base_link_root"])},
+        )
+
+
+@configclass
+class TanchoV3StationSquatKd1TerrainPlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
+    """Flat Play tile, no steady load (scripts set terrain / incline themselves)."""

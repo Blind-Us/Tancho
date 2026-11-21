@@ -55,6 +55,7 @@ parser.add_argument("--motors", choices=["implicit", "explicit"], default="impli
 parser.add_argument("--friction", type=float, default=FRICTION, help="tire / floor friction (Isaac nominal 0.8 x 0.8)")
 parser.add_argument("--init-pitch-deg", type=float, default=0.0, help="initial body pitch offset (deg)")
 parser.add_argument("--video", action="store_true", help="write <output-dir>/mujoco.mp4 (run with MUJOCO_GL=egl)")
+parser.add_argument("--slope-deg", type=float, default=0.0, help="emulate an incline by tilting gravity about y (+x downhill)")
 parser.add_argument("--dt", type=float, default=0.001, help="MuJoCo physics step (Isaac: 0.005)")
 parser.add_argument("--wheel-kd", type=float, default=4.0, help="wheel velocity-loop Kd (StationV4: 1.0)")
 parser.add_argument("--noslip", type=int, default=10, help="MuJoCo noslip_iterations (0 = MuJoCo default)")
@@ -73,6 +74,8 @@ def build_model() -> mujoco.MjModel:
     text = text.replace('filename="meshes/', 'filename="')
     spec = mujoco.MjSpec.from_string(text)
     spec.option.timestep = DT
+    a = math.radians(args.slope_deg)
+    spec.option.gravity = [9.81 * math.sin(a), 0.0, -9.81 * math.cos(a)]
     spec.option.integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
     # Soft friction constraints let a loaded tire creep (2-3 cm/s here with the wheel
     # almost still); the no-slip solver pass removes it, as PhysX's rigid friction.
@@ -170,7 +173,7 @@ def pitch_deg(q):
 
 def build_obs(last_action):
     R = quat_to_mat(data.qpos[3:7])
-    g_b = R.T @ np.array([0, 0, -1.0])
+    g_b = R.T @ (model.opt.gravity / np.linalg.norm(model.opt.gravity))
     w_b = data.qvel[3:6].copy()  # free joint angular velocity is in the body frame
     o = [RX_T @ g_b, 0.25 * (RX_T @ w_b), np.zeros(3)]
     o.append(0.05 * np.array([data.qvel[vadr[j]] for j in WHEELS]))
@@ -298,14 +301,15 @@ for k in range(steps):
                      speed_m_s=float(np.linalg.norm(data.qvel[0:2])),
                      clear_L_m=float(data.xpos[wheel_bodies[0]][2] - WHEEL_R), clear_R_m=float(data.xpos[wheel_bodies[1]][2] - WHEEL_R)))
     R = quat_to_mat(data.qpos[3:7])
-    if math.degrees(math.acos(max(-1.0, min(1.0, R[2, 2])))) > 15.0:
+    up = -model.opt.gravity / np.linalg.norm(model.opt.gravity)
+    if math.degrees(math.acos(max(-1.0, min(1.0, float(R[:, 2] @ up))))) > 15.0:
         fell_at = t
         break
 
 pre = [r for r in rows if push_step is None or r["time_s"] < args.push_time]
 summary = {
     "checkpoint": str(args.checkpoint), "engine": f"mujoco {mujoco.__version__}", "obs_dim": obs_dim,
-    "duration_s": args.duration, "friction": args.friction, "init_pitch_deg": args.init_pitch_deg, "presses": args.presses, "tire": args.tire, "motors": args.motors, "noslip": args.noslip, "dt": DT, "wheel_kd": KD_WHEEL, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
+    "duration_s": args.duration, "slope_deg": args.slope_deg, "friction": args.friction, "init_pitch_deg": args.init_pitch_deg, "presses": args.presses, "tire": args.tire, "motors": args.motors, "noslip": args.noslip, "dt": DT, "wheel_kd": KD_WHEEL, "solref": args.solref, "push_vel_m_s": args.push_vel, "fell_at_s": fell_at,
     "pre_push_max_pitch_dev_deg": max(abs(r["pitch_deg"] - p0) for r in pre),
     "pre_push_max_drift_m": max(r["displacement_m"] for r in pre),
     "max_displacement_m": max(r["displacement_m"] for r in rows),
