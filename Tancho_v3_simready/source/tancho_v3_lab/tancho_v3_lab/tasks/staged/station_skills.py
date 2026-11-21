@@ -438,3 +438,16 @@ class TanchoV3StationIntNoLoadEnvCfg(TanchoV3StationIntEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.events.slope_load = None
+
+
+# MuJoCo, training sensor noise + 20 ms: r16_400's wheel torque sits at its limit 41% of
+# the time (0.3% without noise) and the tires skid; its wheel odometry then reads -0.57 m
+# while the body moved 0.05-0.12 m.  The policy passes the sensor noise straight into the
+# wheel commands (Kd 1: 0.2 rad/s of wheel-speed noise is 0.2 N m).  Isaac's friction
+# holds, so training never paid for it.  Saturation cost x10, torque cost x5; from r16_400.
+@configclass
+class TanchoV3StationSquatKd1QuietTorqueEnvCfg(TanchoV3StationSquatKd1LatEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.rewards.wheel_saturation.weight *= 10.0
+        self.rewards.wheel_torque.weight *= 5.0
