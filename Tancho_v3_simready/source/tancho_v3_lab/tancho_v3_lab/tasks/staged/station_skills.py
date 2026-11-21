@@ -359,3 +359,73 @@ class TanchoV3StationSquatKd1LatTerrainEnvCfg(TanchoV3StationSquatKd1TerrainEnvC
 @configclass
 class TanchoV3StationSquatKd1LatTerrainPlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
     pass
+
+
+# -- integral action on the hold point (2026-11-22) -----------------------------------
+# Every version so far settles 7-70 cm away and slides on an incline: with only the
+# wheel odometry the policy is a P(D) position loop, and a steady load (slope, COM
+# offset, latency bias) needs a steady error to push back.  The Pi can integrate the
+# odometry as easily as it reads it, so the actor gets a leaky integral of it:
+#   I <- I * (1 - dt / 5 s) + odom * dt, per wheel, clipped +/-0.25 m s, x4 -> +/-1.
+# A 5 cm offset held for 5 s fills it.  Reset with the odometry (hold point set).
+from .station import wheel_odometry as _wheel_odometry  # noqa: E402
+from .observations import WHEELS as _WHEELS  # noqa: E402
+
+ODOM_INT_TAU_S = 5.0
+ODOM_INT_CLIP = 0.25
+
+
+def wheel_odometry_integral(env, asset_cfg: SceneEntityCfg = _WHEELS) -> torch.Tensor:
+    """(n, 2) leaky time integral of the wheel odometry (m s), reset with the episode."""
+    step = int(env.common_step_counter)
+    buf = getattr(env, "_odom_int", None)
+    if buf is None:
+        buf = env._odom_int = torch.zeros(env.num_envs, 2, device=env.device)
+        env._odom_int_step = -1
+    if env._odom_int_step != step:
+        env._odom_int_step = step
+        fresh = env.episode_length_buf == 0
+        buf[fresh] = 0.0
+        dt = env.step_dt
+        buf.mul_(1.0 - dt / ODOM_INT_TAU_S).add_(_wheel_odometry(env, asset_cfg) * dt).clamp_(-ODOM_INT_CLIP, ODOM_INT_CLIP)
+    return buf.clone()
+
+
+@configclass
+class StationIntObservationsCfg(StationSkillsObservationsCfg):
+    @configclass
+    class PolicyCfg(StationSkillsObservationsCfg.PolicyCfg):
+        """36 dims: StationSkills' 34 + leaky integral of the wheel odometry L, R."""
+
+        odom_int = ObsTerm(func=wheel_odometry_integral, params={"asset_cfg": _WHEELS}, scale=4.0)
+
+    @configclass
+    class CriticCfg(StationSkillsObservationsCfg.CriticCfg):
+        odom_int = ObsTerm(func=wheel_odometry_integral, params={"asset_cfg": _WHEELS}, scale=4.0)
+
+    policy: PolicyCfg = PolicyCfg()
+    critic: CriticCfg = CriticCfg()
+
+
+@configclass
+class TanchoV3StationIntEnvCfg(TanchoV3StationSquatKd1LatEnvCfg):
+    """Kd1Lat (10-20 ms latency) + odometry integral + the steady +/-2 N body load (flat ground)."""
+
+    observations: StationIntObservationsCfg = StationIntObservationsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.events.slope_load = EventTerm(
+            func=constant_body_push, mode="reset",
+            params={"max_force": 2.0, "none_share": 0.5,
+                    "asset_cfg": SceneEntityCfg("robot", body_names=["base_link_root"])},
+        )
+
+
+@configclass
+class TanchoV3StationIntPlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
+    observations: StationIntObservationsCfg = StationIntObservationsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.observations.policy.enable_corruption = False
