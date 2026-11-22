@@ -88,7 +88,7 @@ class ChargeCommand(CommandTerm):
         released = (new <= 0.0) & (self.held > 0.0)
         self.release_level = torch.where(released, self.level, self.release_level)
         self.phase = torch.where(released, torch.zeros_like(self.phase), self.phase + dt)
-        self.level = torch.where(new > 0.0, (self.level + dt / CROUCH_S).clamp(max=1.0), torch.zeros_like(self.level))
+        self.level = torch.where(new > 0.0, (self.level + dt / self.cfg.crouch_s).clamp(max=1.0), torch.zeros_like(self.level))
         self.held = new
         climb = self._env.command_manager.get_term(self.cfg.climb_command_name)
         climb.recent_timer = torch.where(self.active, torch.full_like(climb.recent_timer, climb.cfg.recent_s), climb.recent_timer)
@@ -111,6 +111,10 @@ class ChargeCommandCfg(CommandTermCfg):
     press_prob: float = 0.5
     press_s: tuple[float, float] = (0.15, 1.5)
     """Hold time (s): short presses are shallow charges, >= ``CROUCH_S`` full ones."""
+    crouch: tuple[float, float] = CROUCH
+    """Full-depth (dthigh, dcalf) offset while held."""
+    crouch_s: float = CROUCH_S
+    """Time to reach full depth while held (s)."""
     jump: bool = True
     """False: releasing stands back up (squat only), no push-off."""
 
@@ -118,7 +122,7 @@ class ChargeCommandCfg(CommandTermCfg):
 def charge_offsets(term: ChargeCommand) -> torch.Tensor:
     """(N, 4) leg offsets thigh_L, calf_L, thigh_R, calf_R (both legs the same)."""
     dev = term.device
-    crouch = torch.tensor(CROUCH, device=dev)
+    crouch = torch.tensor(term.cfg.crouch, device=dev)
     held = term.held.unsqueeze(1) * term.level.unsqueeze(1) * crouch  # (N, 2)
     p = term.phase.unsqueeze(1)  # (N, 1)
     start = term.release_level.unsqueeze(1) * crouch

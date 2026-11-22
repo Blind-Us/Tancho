@@ -206,3 +206,31 @@ class TanchoV3StationWalkHopFastPlayEnvCfg(TanchoV3StationWalkHopPlayEnvCfg):
         super().__post_init__()
         self.commands.base_velocity.ranges.lin_vel_x = (-1.2, 1.2)
         self.commands.base_velocity.ranges.ang_vel_z = (-1.5, 1.5)
+
+
+# -- final (2026-11-23): faster, deeper crouch, bumpy ground ---------------------------
+# User TODOs from the 11-22 teleop: crouch lower (chassis bottom under 15 cm; the HopCharge
+# crouch (-0.305, +0.75) leaves it at 16.2 cm, (-0.45, +1.10) at 12.9 cm with the COM still
+# over the axle, URDF FK), faster driving (1.2 m/s / 1.5 rad/s) and other ground: half of
+# the tiles 0-2 cm bumps (HOP generator, all levels, no curriculum).
+from .terrain import HOP_GENERATOR, make_terrain  # noqa: E402
+
+FINAL_CROUCH = (-0.45, 1.10)
+FINAL_CROUCH_S = 0.45
+
+
+@configclass
+class TanchoV3StationFinalEnvCfg(TanchoV3StationWalkHopFastEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.charge.crouch = FINAL_CROUCH
+        self.commands.charge.crouch_s = FINAL_CROUCH_S
+        self.scene.terrain = make_terrain(HOP_GENERATOR, max_init_level=None)
+
+
+@configclass
+class TanchoV3StationFinalPlayEnvCfg(TanchoV3StationWalkHopFastPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.charge.crouch = FINAL_CROUCH
+        self.commands.charge.crouch_s = FINAL_CROUCH_S
