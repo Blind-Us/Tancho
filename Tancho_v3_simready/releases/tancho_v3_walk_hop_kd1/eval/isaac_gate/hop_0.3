@@ -1,0 +1,293 @@
+{
+  "checkpoint": "/home/azul/Tancho/Tancho_v3_simready/logs/station_20261103/ckpt_scan/r25_600/exported/policy.pt",
+  "guidance": 1.0,
+  "leg_kp": null,
+  "leg_kd": null,
+  "vx": 0.3,
+  "yaw": 0.0,
+  "gap_s": 3.0,
+  "press_s": 0.4,
+  "terminated_at_s": null,
+  "presses": [
+    {
+      "mode": "LT",
+      "clear_L_m": 0.03309064731001854,
+      "clear_R_m": 0.005483695771545172,
+      "both_air_s": 0.02,
+      "air_root_rise_m": 0.008715689182281494,
+      "peak_root_vz_m_s": 0.38047850131988525,
+      "pass": true
+    },
+    {
+      "mode": "RT",
+      "clear_L_m": 0.0035921125672757626,
+      "clear_R_m": 0.034144286066293716,
+      "both_air_s": 0.0,
+      "air_root_rise_m": 0.0,
+      "peak_root_vz_m_s": 0.38272473216056824,
+      "pass": true
+    },
+    {
+      "mode": "LT+RT",
+      "clear_L_m": 0.03398790583014488,
+      "clear_R_m": 0.03793935850262642,
+      "both_air_s": 0.1,
+      "air_root_rise_m": 0.013684332370758057,
+      "peak_root_vz_m_s": 0.5832570195198059,
+      "pass": true,
+      "pass_active_jump": true
+    },
+    {
+      "mode": "CHG",
+      "clear_L_m": 0.0,
+      "clear_R_m": 0.0,
+      "both_air_s": 0.0,
+      "air_root_rise_m": 0.0,
+      "peak_root_vz_m_s": 0.2768408954143524,
+      "pass": false,
+      "pass_active_jump": false
+    },
+    {
+      "mode": "LT",
+      "clear_L_m": 0.03375384584069252,
+      "clear_R_m": 0.006466654594987631,
+      "both_air_s": 0.02,
+      "air_root_rise_m": 0.00902491807937622,
+      "peak_root_vz_m_s": 0.3878398537635803,
+      "pass": true
+    },
+    {
+      "mode": "RT",
+      "clear_L_m": 0.003038065042346716,
+      "clear_R_m": 0.035385873168706894,
+      "both_air_s": 0.0,
+      "air_root_rise_m": 0.0,
+      "peak_root_vz_m_s": 0.37918826937675476,
+      "pass": true
+    },
+    {
+      "mode": "LT+RT",
+      "clear_L_m": 0.03287050500512123,
+      "clear_R_m": 0.03635613992810249,
+      "both_air_s": 0.1,
+      "air_root_rise_m": 0.013445228338241577,
+      "peak_root_vz_m_s": 0.5645900964736938,
+      "pass": true,
+      "pass_active_jump": true
+    },
+    {
+      "mode": "CHG",
+      "clear_L_m": 0.0,
+      "clear_R_m": 0.0,
+      "both_air_s": 0.0,
+      "air_root_rise_m": 0.0,
+      "peak_root_vz_m_s": 0.296482652425766,
+      "pass": false,
+      "pass_active_jump": false
+    }
+  ],
+  "joint_order": [
+    "thigh_L",
+    "calf_L",
+    "thigh_R",
+    "calf_R"
+  ],
+  "joint_diagnostics": [
+    {
+      "mode": "LT",
+      "peak_joint_excursion_rad": [
+        0.3257827162742615,
+        0.5447958707809448,
+        0.10807675123214722,
+        0.07809877395629883
+      ],
+      "peak_joint_speed_rad_s": [
+        12.490437507629395,
+        12.529189109802246,
+        4.830921649932861,
+        3.556635856628418
+      ],
+      "peak_joint_torque_Nm": [
+        4.010127067565918,
+        9.353363037109375,
+        2.349712371826172,
+        1.5796931982040405
+      ],
+      "calf_return_time_s": 0.42,
+      "peak_abs_pitch_after_release_deg": 3.795077365547105,
+      "thigh_tuck_after_release_rad": 0.3257827162742615
+    },
+    {
+      "mode": "RT",
+      "peak_joint_excursion_rad": [
+        0.13204562664031982,
+        0.11817723512649536,
+        0.42761021852493286,
+        0.5386855602264404
+      ],
+      "peak_joint_speed_rad_s": [
+        5.026158332824707,
+        2.099675416946411,
+        12.402892112731934,
+        12.540186882019043
+      ],
+      "peak_joint_torque_Nm": [
+        1.952881097793579,
+        1.6252284049987793,
+        4.510725021362305,
+        10.795726776123047
+      ],
+      "calf_return_time_s": 0.42,
+      "peak_abs_pitch_after_release_deg": 1.6528273336143813,
+      "thigh_tuck_after_release_rad": 0.42761021852493286
+    },
+    {
+      "mode": "LT+RT",
+      "peak_joint_excursion_rad": [
+        0.3626958131790161,
+        0.64902663230896,
+        0.41606295108795166,
+        0.5933059453964233
+      ],
+      "peak_joint_speed_rad_s": [
+        12.49998950958252,
+        12.516144752502441,
+        12.499988555908203,
+        12.500000953674316
+      ],
+      "peak_joint_torque_Nm": [
+        4.687829971313477,
+        7.707670211791992,
+        6.467959403991699,
+        10.91413688659668
+      ],
+      "calf_return_time_s": 0.42,
+      "peak_abs_pitch_after_release_deg": 3.3843223189163125,
+      "thigh_tuck_after_release_rad": 0.41606295108795166
+    },
+    {
+      "mode": "CHG",
+      "peak_joint_excursion_rad": [
+        0.24338364601135254,
+        0.7568999528884888,
+        0.2363455891609192,
+        0.7054712772369385
+      ],
+      "peak_joint_speed_rad_s": [
+        0.8012964725494385,
+        3.6204001903533936,
+        1.0720881223678589,
+        3.4228098392486572
+      ],
+      "peak_joint_torque_Nm": [
+        0.2530099153518677,
+        1.1636710166931152,
+        0.23963512480258942,
+        1.2742655277252197
+      ],
+      "calf_return_time_s": 1.0,
+      "peak_abs_pitch_after_release_deg": 3.3540187178614054,
+      "thigh_tuck_after_release_rad": 0.2423129677772522
+    },
+    {
+      "mode": "LT",
+      "peak_joint_excursion_rad": [
+        0.3263090252876282,
+        0.548832893371582,
+        0.11950159072875977,
+        0.1007620096206665
+      ],
+      "peak_joint_speed_rad_s": [
+        12.490541458129883,
+        12.514537811279297,
+        5.2049560546875,
+        4.24029016494751
+      ],
+      "peak_joint_torque_Nm": [
+        3.9076969623565674,
+        9.21626091003418,
+        2.168445110321045,
+        1.5898240804672241
+      ],
+      "calf_return_time_s": 0.42,
+      "peak_abs_pitch_after_release_deg": 2.4257133054055187,
+      "thigh_tuck_after_release_rad": 0.3263090252876282
+    },
+    {
+      "mode": "RT",
+      "peak_joint_excursion_rad": [
+        0.12773048877716064,
+        0.1369180679321289,
+        0.42169445753097534,
+        0.5375912189483643
+      ],
+      "peak_joint_speed_rad_s": [
+        5.111640930175781,
+        2.274827003479004,
+        12.405865669250488,
+        12.55899429321289
+      ],
+      "peak_joint_torque_Nm": [
+        1.8432799577713013,
+        1.4968879222869873,
+        4.643030166625977,
+        11.041421890258789
+      ],
+      "calf_return_time_s": 0.42,
+      "peak_abs_pitch_after_release_deg": 2.4939237961878344,
+      "thigh_tuck_after_release_rad": 0.42169445753097534
+    },
+    {
+      "mode": "LT+RT",
+      "peak_joint_excursion_rad": [
+        0.36535000801086426,
+        0.5919778347015381,
+        0.41633158922195435,
+        0.5932587385177612
+      ],
+      "peak_joint_speed_rad_s": [
+        12.49998664855957,
+        12.500969886779785,
+        12.499979972839355,
+        12.500006675720215
+      ],
+      "peak_joint_torque_Nm": [
+        4.71748161315918,
+        7.778622627258301,
+        6.509711265563965,
+        11.372456550598145
+      ],
+      "calf_return_time_s": 0.44,
+      "peak_abs_pitch_after_release_deg": 4.491978572250839,
+      "thigh_tuck_after_release_rad": 0.41633158922195435
+    },
+    {
+      "mode": "CHG",
+      "peak_joint_excursion_rad": [
+        0.24944233894348145,
+        0.7494678497314453,
+        0.23572665452957153,
+        0.6953758001327515
+      ],
+      "peak_joint_speed_rad_s": [
+        0.8272376656532288,
+        3.8078629970550537,
+        1.0444048643112183,
+        3.7418878078460693
+      ],
+      "peak_joint_torque_Nm": [
+        0.26300519704818726,
+        1.1051541566848755,
+        0.29359179735183716,
+        1.1718521118164062
+      ],
+      "calf_return_time_s": 1.0,
+      "peak_abs_pitch_after_release_deg": 2.43265297743281,
+      "thigh_tuck_after_release_rad": 0.2416788935661316
+    }
+  ],
+  "calf_return_definition": "pressed calf within 0.1 rad of +0.87 for 0.1 s after reference ends",
+  "pass_no_failure": true,
+  "pass_lift": false,
+  "pass_all": false
+}
