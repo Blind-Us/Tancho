@@ -329,3 +329,15 @@ for _suffix, _cfg in (("-v0", "TanchoV3StationSquatKd1Push2EnvCfg"), ("-Play-v0"
             "rsl_rl_cfg_entry_point": f"{__name__}.station_skills:TanchoV3StationSkillsPPORunnerCfg",
         },
     )
+
+# RL v2 stage 2: WASD driving with a hold point (user 2026-11-22).
+for _suffix, _cfg in (("-v0", "TanchoV3StationWalkEnvCfg"), ("-Play-v0", "TanchoV3StationWalkPlayEnvCfg")):
+    gym.register(
+        id="TanchoV3-StationWalk" + _suffix,
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.station_walk:{_cfg}",
+            "rsl_rl_cfg_entry_point": f"{__name__}.station_skills:TanchoV3StationSkillsPPORunnerCfg",
+        },
+    )
