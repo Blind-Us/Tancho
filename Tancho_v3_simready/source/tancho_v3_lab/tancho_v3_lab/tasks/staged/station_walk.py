@@ -255,3 +255,16 @@ class TanchoV3StationFinalTrackEnvCfg(TanchoV3StationFinalEnvCfg):
         super().__post_init__()
         self.rewards.lin_vel_xy.weight, self.rewards.lin_vel_xy.params["std"] = 3.0, 0.3
         self.rewards.ang_vel_z.weight, self.rewards.ang_vel_z.params["std"] = 1.5, 0.3
+
+
+# Run 30 (tracking std 0.3, weight 3) reached 1.2 m/s but stood 0.9-1.0 m off its stop
+# point.  Middle ground: std 0.4, weight 2.5 / 1.25, and the standing hold terms x2.
+@configclass
+class TanchoV3StationFinalTrackHoldEnvCfg(TanchoV3StationFinalEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.rewards.lin_vel_xy.weight, self.rewards.lin_vel_xy.params["std"] = 2.5, 0.4
+        self.rewards.ang_vel_z.weight, self.rewards.ang_vel_z.params["std"] = 1.25, 0.4
+        self.rewards.pos_l1.weight *= 2.0
+        self.rewards.pos_hold.weight *= 2.0
+        self.rewards.pos_hold_wide.weight *= 2.0
