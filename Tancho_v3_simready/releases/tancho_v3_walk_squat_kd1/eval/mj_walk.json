@@ -1,0 +1,90 @@
+{
+  "checkpoint": "logs/rsl_rl/tancho_v3_station_skills/2026-11-22_15-00-17_8357daf/exported/policy.pt",
+  "engine": "mujoco 3.13.0",
+  "obs_dim": 34,
+  "duration_s": 40.0,
+  "latency_ms": 0,
+  "obs_noise": false,
+  "noise_scale": 1.0,
+  "slope_deg": 0.0,
+  "friction": 0.64,
+  "init_pitch_deg": 0.0,
+  "presses": "",
+  "tire": "cylinder",
+  "motors": "implicit",
+  "noslip": 10,
+  "dt": 0.001,
+  "wheel_kd": 1.0,
+  "solref": 0.005,
+  "push_vel_m_s": 0.0,
+  "fell_at_s": null,
+  "pre_push_max_pitch_dev_deg": 6.487633503577658,
+  "pre_push_max_drift_m": 3.688577726019944,
+  "max_displacement_m": 3.688577726019944,
+  "end_displacement_m": 2.7756960691821284,
+  "end_speed_m_s": 0.02990249405666927,
+  "wheel_saturation_frac": 0.11486249999999999,
+  "max_tilt_deg": 6.490653082976042,
+  "tracking": [
+    {
+      "t0": 0.0,
+      "vx": 0.0,
+      "wz": 0.0,
+      "mean_vx": 0.011509298428291136,
+      "mean_wz": 0.000500283258814255
+    },
+    {
+      "t0": 3.0,
+      "vx": 0.3,
+      "wz": 0.0,
+      "mean_vx": 0.2380272812965008,
+      "mean_wz": 0.028659791715896613
+    },
+    {
+      "t0": 8.0,
+      "vx": 0.6,
+      "wz": 0.0,
+      "mean_vx": 0.4952672585820162,
+      "mean_wz": 0.06875905220479366
+    },
+    {
+      "t0": 13.0,
+      "vx": -0.3,
+      "wz": 0.0,
+      "mean_vx": -0.24866617283906423,
+      "mean_wz": -0.001848487665133878
+    },
+    {
+      "t0": 18.0,
+      "vx": 0.0,
+      "wz": 1.0,
+      "mean_vx": 0.04929425919159516,
+      "mean_wz": 1.0557845462783242
+    },
+    {
+      "t0": 23.0,
+      "vx": 0.0,
+      "wz": -0.5,
+      "mean_vx": 0.0008489673980362451,
+      "mean_wz": -0.4821434192118896
+    },
+    {
+      "t0": 28.0,
+      "vx": 0.4,
+      "wz": 0.5,
+      "mean_vx": 0.3515083471652903,
+      "mean_wz": 0.5742329203089458
+    },
+    {
+      "t0": 33.0,
+      "vx": 0.0,
+      "wz": 0.0,
+      "mean_vx": 0.001675164762678661,
+      "mean_wz": 0.008577110217191498
+    }
+  ],
+  "press_clearance_m": {},
+  "pass_no_fall": true,
+  "pass_drift": false,
+  "pass_all": false
+}
