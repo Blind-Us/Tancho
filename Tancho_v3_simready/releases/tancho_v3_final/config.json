@@ -1,0 +1,293 @@
+{
+ "name": "tancho_v3_final",
+ "git_commit": "85dfd84 (train)",
+ "task": "TanchoV3-StationFinal-v0 (Play: TanchoV3-StationFinal-Play-v0)",
+ "run": "logs/rsl_rl/tancho_v3_station_skills/2026-11-23_03-25-48_85dfd84/model_1200.pt",
+ "files": {
+  "onnx": "policy.onnx",
+  "torchscript": "policy.pt",
+  "urdf": "robot/Tancho_v3.urdf",
+  "reference_table": "reference_lift_table.csv",
+  "io_check": "reference_io.json",
+  "reference_io": "reference_io.json"
+ },
+ "onnx": {
+  "input": "obs float32 [1,34]",
+  "output": "actions float32 [1,6]",
+  "obs_normalization": "inside the model: feed the scaled raw values below, do not normalize again",
+  "action_clip": "not inside the model: clip to [-1,1] yourself",
+  "verified": "onnxruntime vs TorchScript on reference_io.json: max abs err 9e-8"
+ },
+ "timing": {
+  "physics_dt_s": 0.005,
+  "decimation": 4,
+  "policy_dt_s": 0.02,
+  "policy_hz": 50
+ },
+ "gravity": [
+  0,
+  0,
+  -9.81
+ ],
+ "joint_order_actions": [
+  "joint_thigh_L",
+  "joint_calf_L",
+  "joint_thigh_R",
+  "joint_calf_R",
+  "joint_wheel_L",
+  "joint_wheel_R"
+ ],
+ "default_joint_pos_rad": {
+  "joint_thigh_L": -0.5,
+  "joint_calf_L": 0.87,
+  "joint_thigh_R": -0.5,
+  "joint_calf_R": 0.87,
+  "joint_wheel_L": 0.0,
+  "joint_wheel_R": 0.0
+ },
+ "initial_state": {
+  "root_height_m": 0.2614,
+  "root_quat_wxyz": [
+   1,
+   0,
+   0,
+   0
+  ],
+  "note": "tires on z=0 at the default leg pose; spawn ~1 mm higher"
+ },
+ "observation": [
+  {
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "name": "projected_gravity",
+   "frame": "IMU",
+   "scale": 1.0,
+   "upright_value": [
+    0,
+    -1,
+    0
+   ]
+  },
+  {
+   "index": [
+    3,
+    4,
+    5
+   ],
+   "name": "imu_angular_velocity_rad_s",
+   "frame": "IMU",
+   "scale": 0.25
+  },
+  {
+   "index": [
+    6,
+    7,
+    8
+   ],
+   "name": "velocity_command",
+   "content": "vx m/s (-1.2..1.2), vy = 0, yaw rate rad/s (-1.5..1.5) from the sticks / WASD",
+   "scale": 1.0,
+   "range": {
+    "vx": [
+     -0.6,
+     0.6
+    ],
+    "yaw": [
+     -1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "index": [
+    9,
+    10
+   ],
+   "name": "wheel_velocity_rad_s",
+   "joints": [
+    "joint_wheel_L",
+    "joint_wheel_R"
+   ],
+   "scale": 0.05
+  },
+  {
+   "index": [
+    11,
+    12,
+    13,
+    14,
+    15,
+    16
+   ],
+   "name": "last_action",
+   "content": "previous clipped action (6 dims), WITHOUT the reference offsets",
+   "scale": 1.0
+  },
+  {
+   "index": [
+    17,
+    18,
+    19,
+    20
+   ],
+   "name": "leg_pos_minus_default_rad",
+   "joints": [
+    "joint_thigh_L",
+    "joint_calf_L",
+    "joint_thigh_R",
+    "joint_calf_R"
+   ],
+   "scale": 1.0
+  },
+  {
+   "index": [
+    21,
+    22,
+    23,
+    24
+   ],
+   "name": "leg_velocity_rad_s",
+   "joints": [
+    "joint_thigh_L",
+    "joint_calf_L",
+    "joint_thigh_R",
+    "joint_calf_R"
+   ],
+   "scale": 0.05
+  },
+  {
+   "index": [
+    25,
+    26
+   ],
+   "name": "trigger_LT_RT",
+   "content": "0/1 held (LT = lift left leg, RT = right, both = hop)",
+   "scale": 1.0
+  },
+  {
+   "index": [
+    27,
+    28
+   ],
+   "name": "phase_L_R",
+   "content": "min(seconds since that side's lift started, 0.6) / 0.6; 1 when idle",
+   "scale": 1.0
+  },
+  {
+   "index": [
+    29,
+    30
+   ],
+   "name": "wheel_odometry",
+   "joints": [
+    "joint_wheel_L",
+    "joint_wheel_R"
+   ],
+   "content": "2 * clip(0.03614 * (q_wheel - q_hold), -0.5, 0.5); q_hold = q_wheel on every step where |vx| > 0.05 or |yaw| > 0.05 (stick off-centre), so it is 0 while driving and measures the drift from where the robot stopped",
+   "scale": 1.0
+  },
+  {
+   "index": [
+    31,
+    32,
+    33
+   ],
+   "name": "crouch_state",
+   "content": "[held 0/1, crouch level 0-1 (+0.02/0.35 per step while held, 0 when released), min(seconds since release, 0.6)/0.6 (1 when idle)]",
+   "scale": 1.0
+  }
+ ],
+ "imu_mount": {
+  "parent_link": "base_link_root",
+  "pos_m": [
+   -0.00835741999,
+   1.60456e-08,
+   -0.0294337942
+  ],
+  "quat_wxyz": [
+   0.707106781,
+   0.707106781,
+   0.0,
+   0.0
+  ],
+  "note": "+90 deg about x: IMU x = body forward, y = up, z = body right; upright gravity reads (0,-1,0), pitch rate on z"
+ },
+ "action": {
+  "clip": [
+   -1.0,
+   1.0
+  ],
+  "legs": {
+   "joints": [
+    "joint_thigh_L",
+    "joint_calf_L",
+    "joint_thigh_R",
+    "joint_calf_R"
+   ],
+   "target_rad": "default + 0.6 * a + reference_offset(phase of that side)",
+   "scale_rad": 0.6,
+   "reference_guidance": 1.0
+  },
+  "wheels": {
+   "joints": [
+    "joint_wheel_L",
+    "joint_wheel_R"
+   ],
+   "target_vel_rad_s": "52.3598776 * a",
+   "scale_rad_s": 52.3598776
+  }
+ },
+ "actuators": {
+  "legs_DM-J4310": {
+   "type": "PD position (Isaac Lab implicit actuator, evaluated every 5 ms physics step)",
+   "kp_Nm_per_rad": 20.0,
+   "kd_Nm_s_per_rad": 0.2,
+   "effort_limit_Nm": 12.5,
+   "velocity_limit_rad_s": 12.5,
+   "torque": "tau = 20*(q_target - q) + 0.2*(0 - qdot), clamped to +/-12.5 Nm; PhysX also caps the joint speed at 12.5 rad/s"
+  },
+  "wheels_DM-H3510": {
+   "type": "velocity loop (kp 0)",
+   "kd_Nm_s_per_rad": 1.0,
+   "effort_limit_Nm": 0.45,
+   "velocity_limit_rad_s": 188.0,
+   "torque": "tau = 1.0*(qdot_target - qdot), clamped to +/-0.45 Nm  (CHANGED from Kd 4: set MIT-mode kd = 1.0)"
+  }
+ },
+ "reference_lift": {
+  "table": "reference_lift_table.csv (per side, 0.02 s steps; offset 0 once phase >= 0.4 s)",
+  "profile": "0-0.02 s push (+0.275, -0.6), 0.02-0.22 s tuck (-0.3, +0.6), 0.22-0.40 s linear back to 0",
+  "press_rules": [
+   "every policy step: phase[s] += 0.02",
+   "rising edge and phase[s] >= 0.399: phase[s] = 0 (start)",
+   "rising edge while phase[s] < 0.399: queue it (max one), start when that side is free",
+   "LT+RT: if both sides want to start but one is still busy, both wait and start together (hop)"
+  ]
+ },
+ "physics": {
+  "friction": "Isaac: ground 0.8 x robot 0.8 (multiply) = 0.64 effective; MuJoCo combines with max, so set the tire/ground pair to about 0.64",
+  "tire_collision": "URDF wheel collision geometry, radius 0.03614 m",
+  "total_mass_kg": 2.6235
+ },
+ "training_termination": {
+  "tilt_deg": 15,
+  "tilt_deg_after_a_press": 35,
+  "body_contact": "base / thigh / calf > 10 N"
+ },
+ "known_gap": "DM-J4310 V1.2 TN curve: at 120 rpm only ~4.5 Nm is available; the sim allows 12.5 Nm up to 12.5 rad/s, so it is optimistic for fast leg motions",
+ "crouch": {
+  "button": "hold Shift / J",
+  "offset_while_held": "level * (-0.45, +1.10) added to (thigh, calf) of both legs; level += 0.02 / 0.45 per step while held",
+  "after_release": "release_level * (-0.45, +1.10) * max(0, 1 - t_release / 0.28)",
+  "cooldown": "ignore a new press until 0.3 s after the last release",
+  "chassis_bottom": "0.11 m above the ground at full depth (MuJoCo), 0.215 m standing"
+ },
+ "notes": [
+  "No hops: LT+RT together and the charged jump are not trained in this policy.",
+  "Wheel Kd 1.0 is required (the policy was trained with it).",
+  "Physics randomized in training: leg Kp/Kd and wheel Kd x0.8-1.2, body COM x +/-2 cm, 10-20 ms action latency, friction 0.32-0.96, training sensor noise."
+ ]
+}
