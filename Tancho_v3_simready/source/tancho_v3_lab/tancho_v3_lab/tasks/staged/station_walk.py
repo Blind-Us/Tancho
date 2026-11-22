@@ -176,3 +176,12 @@ class TanchoV3StationWalkHopEnvCfg(TanchoV3StationWalkEnvCfg):
 @configclass
 class TanchoV3StationWalkHopPlayEnvCfg(TanchoV3StationWalkPlayEnvCfg):
     pass
+
+
+@configclass
+class TanchoV3StationWalkHopPushEnvCfg(TanchoV3StationWalkHopEnvCfg):
+    """WalkHop with kicks every 2-4 s (was 3-6 s): push-in-press falls 2% for release walk_hop_kd1."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.events.push_robot.interval_range_s = (2.0, 4.0)
