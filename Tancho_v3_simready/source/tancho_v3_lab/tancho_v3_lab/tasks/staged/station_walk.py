@@ -234,3 +234,14 @@ class TanchoV3StationFinalPlayEnvCfg(TanchoV3StationWalkHopFastPlayEnvCfg):
         super().__post_init__()
         self.commands.charge.crouch = FINAL_CROUCH
         self.commands.charge.crouch_s = FINAL_CROUCH_S
+
+
+# Final (run 28 iteration 1200) stands with a 1.4-3.6 deg pitch limit cycle, so the report's
+# recovery time (+/-1 deg) is ~4 s against LQR's 0.18 s.  Pitch-rate cost x5, upright x2;
+# from the final checkpoint, short run.
+@configclass
+class TanchoV3StationFinalCalmEnvCfg(TanchoV3StationFinalEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.rewards.ang_vel_xy.weight *= 5.0
+        self.rewards.upright.weight *= 2.0
