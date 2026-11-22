@@ -48,6 +48,8 @@ parser.add_argument("--push-vel", type=float, default=0.0)
 parser.add_argument("--presses", default="", help="e.g. 'LT:3,RT:6,LT+RT:9,CHG:12' (button:start s); LT/RT held --press-s, CHG held --charge-s")
 parser.add_argument("--press-s", type=float, default=0.4)
 parser.add_argument("--charge-s", type=float, default=0.6)
+parser.add_argument("--crouch", default="-0.305,0.75", help="full-depth crouch offset 'dthigh,dcalf' (StationFinal: -0.45,1.10)")
+parser.add_argument("--crouch-s", type=float, default=0.35, help="time to full depth while held (StationFinal: 0.45)")
 parser.add_argument("--charge-cooldown", type=float, default=0.0, help="ignore a crouch press until this long after the last release (s); 0.3 = the stand-up is over")
 parser.add_argument("--charge-jump", type=int, default=1, help="0: released crouch stands back up (StationSquat), 1: charged hop (HopCharge)")
 parser.add_argument("--output-dir", type=Path, required=True)
@@ -211,7 +213,7 @@ def build_obs(last_action):
 
 # -- operator presses: LT / RT lift reference (Pi table) and the HopCharge crouch -------
 LIFT = np.loadtxt(ROOT / "releases/tancho_v3_hop_r3_mujoco/reference_lift_table.csv", delimiter=",", skiprows=1)[:, 2:4]
-CROUCH, CROUCH_S, EXTEND, CHARGE_STEP_S = np.array([-0.305, 0.75]), 0.35, np.array([0.245, -0.60]), 0.01
+CROUCH, CROUCH_S, EXTEND, CHARGE_STEP_S = np.array([float(x) for x in args.crouch.split(",")]), args.crouch_s, np.array([0.245, -0.60]), 0.01
 CHARGE_KEYS = ((CHARGE_STEP_S, 0.245, -0.60), (0.07, 0.245, -0.60), (0.08, -0.305, 0.75), (0.16, -0.305, 0.75), (0.28, 0.0, 0.0))
 trig, phase = np.zeros(2), np.full(2, 10.0)
 chg_held, chg_level, chg_phase, chg_release_level = 0.0, 0.0, 10.0, 0.0
@@ -281,6 +283,15 @@ p0 = pitch_deg(data.qpos[3:7])
 steps = math.ceil(args.duration / (DT * SUB))
 push_step = round(args.push_time / (DT * SUB)) if args.push_vel != 0 else None
 rows, fell_at, sat = [], None, []
+_box = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "base_link_collision_box")
+
+
+def chassis_bottom():
+    """Lowest corner of the base collision box above z = 0 (the deep-squat height reference)."""
+    R_, c_, h_ = data.geom_xmat[_box].reshape(3, 3), data.geom_xpos[_box], model.geom_size[_box]
+    return min(float((c_ + R_ @ (np.array([a, b, e]) * h_))[2]) for a in (-1, 1) for b in (-1, 1) for e in (-1, 1))
+
+
 max_tilt = 0.0
 frames = []
 if args.video:
@@ -342,7 +353,7 @@ for k in range(steps):
     rows.append(dict(time_s=t, pitch_deg=p, displacement_m=disp, height_m=float(data.qpos[2]),
                      speed_m_s=float(np.linalg.norm(data.qvel[0:2])),
                      vx_body_m_s=float((quat_to_mat(data.qpos[3:7]).T @ data.qvel[0:3])[0]), wz_rad_s=float(data.qvel[5]),
-                     cmd_vx=float(cmd_now[0]), cmd_wz=float(cmd_now[1]),
+                     cmd_vx=float(cmd_now[0]), cmd_wz=float(cmd_now[1]), chassis_m=chassis_bottom(),
                      clear_L_m=float(data.xpos[wheel_bodies[0]][2] - WHEEL_R), clear_R_m=float(data.xpos[wheel_bodies[1]][2] - WHEEL_R)))
     R = quat_to_mat(data.qpos[3:7])
     up = -model.opt.gravity / np.linalg.norm(model.opt.gravity)
@@ -365,6 +376,7 @@ summary = {
     "end_displacement_m": rows[-1]["displacement_m"], "end_speed_m_s": rows[-1]["speed_m_s"],
     "wheel_saturation_frac": float(np.mean(sat)),
     "max_tilt_deg": max_tilt,
+    "min_chassis_bottom_m": min(r["chassis_m"] for r in rows),
     "tracking": [dict(t0=t0, vx=vx, wz=wz, **(lambda seg: dict(mean_vx=float(np.mean([r["vx_body_m_s"] for r in seg])) if seg else None,
                                                                 mean_wz=float(np.mean([r["wz_rad_s"] for r in seg])) if seg else None))(
                      [r for r in rows if t0 + 1.5 <= r["time_s"] < (CMDS[i + 1][0] if i + 1 < len(CMDS) else 1e9)]))
