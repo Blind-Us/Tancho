@@ -156,3 +156,23 @@ class TanchoV3StationWalkPlayEnvCfg(TanchoV3StationSquatKd1ComPlayEnvCfg):
         c = self.commands.base_velocity
         c.ranges.lin_vel_x = (-0.6, 0.6)
         c.ranges.ang_vel_z = (-1.0, 1.0)
+
+
+# -- the standard hop back in, on the driving policy (user 2026-11-22: hop must be trained) --
+@configclass
+class TanchoV3StationWalkHopEnvCfg(TanchoV3StationWalkEnvCfg):
+    """StationWalk + LT+RT presses (v1 hop reference, hop_rise as hop r3); crouch still stands up."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.climb.allow_both = True
+        self.rewards.hop_rise.weight = 200.0
+        # Full command range from the start (the walk checkpoint already drives).
+        self.curriculum = None
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.6, 0.6)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+
+
+@configclass
+class TanchoV3StationWalkHopPlayEnvCfg(TanchoV3StationWalkPlayEnvCfg):
+    pass

@@ -61,6 +61,7 @@ parser.add_argument("--obs-noise", action="store_true", help="add the training s
 parser.add_argument("--noise-scale", type=float, default=1.0, help="multiplies the --obs-noise amplitudes")
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--slope-deg", type=float, default=0.0, help="emulate an incline by tilting gravity about y (+x downhill)")
+parser.add_argument("--cmd", default="", help="velocity command schedule 't0:vx:wz,...' (held until the next entry); the odometry hold point follows the robot while non-zero")
 parser.add_argument("--dt", type=float, default=0.001, help="MuJoCo physics step (Isaac: 0.005)")
 parser.add_argument("--wheel-kd", type=float, default=4.0, help="wheel velocity-loop Kd (StationV4: 1.0)")
 parser.add_argument("--noslip", type=int, default=10, help="MuJoCo noslip_iterations (0 = MuJoCo default)")
@@ -177,20 +178,26 @@ def pitch_deg(q):
 
 
 odom_int = np.zeros(2)
+hold_q = np.zeros(2)
+cmd_now = np.zeros(2)
+CMDS = sorted((float(a), float(b), float(c)) for a, b, c in (x.split(":") for x in args.cmd.split(",") if x))
 
 
 def build_obs(last_action):
     R = quat_to_mat(data.qpos[3:7])
     g_b = R.T @ (model.opt.gravity / np.linalg.norm(model.opt.gravity))
     w_b = data.qvel[3:6].copy()  # free joint angular velocity is in the body frame
-    o = [RX_T @ g_b, 0.25 * (RX_T @ w_b), np.zeros(3)]
+    o = [RX_T @ g_b, 0.25 * (RX_T @ w_b), np.array([cmd_now[0], 0.0, cmd_now[1]])]
     o.append(0.05 * np.array([data.qvel[vadr[j]] for j in WHEELS]))
     o.append(last_action)
     o.append(np.array([data.qpos[qadr[j]] - DEFAULT[j] for j in LEGS]))
     o.append(0.05 * np.array([data.qvel[vadr[j]] for j in LEGS]))
     o.append(trig.copy())  # LT / RT held
     o.append(np.minimum(phase, 0.6) / 0.6)
-    odom = np.clip(WHEEL_R * np.array([data.qpos[qadr[j]] for j in WHEELS]), -0.5, 0.5)
+    qw = np.array([data.qpos[qadr[j]] for j in WHEELS])
+    if abs(cmd_now[0]) > 0.05 or abs(cmd_now[1]) > 0.05:
+        hold_q[:] = qw  # StationWalk: the Pi re-zeroes the odometry while the stick is off-centre
+    odom = np.clip(WHEEL_R * (qw - hold_q), -0.5, 0.5)
     if obs_dim in (31, 34, 36):
         o.append(2.0 * odom)
     if obs_dim in (32, 34, 36):
@@ -288,6 +295,9 @@ for k in range(steps):
         fwd = R[:, 0].copy(); fwd[2] = 0; fwd /= np.linalg.norm(fwd)
         data.qvel[0:2] += args.push_vel * fwd[:2]
     update_buttons(k * DT * SUB)
+    for t0, vx, wz in CMDS:
+        if k * DT * SUB >= t0:
+            cmd_now[:] = (vx, wz)
     with torch.no_grad():
         o = build_obs(last)
         if args.obs_noise:
@@ -331,6 +341,8 @@ for k in range(steps):
     disp = float(np.linalg.norm(data.qpos[0:2] - xy0))
     rows.append(dict(time_s=t, pitch_deg=p, displacement_m=disp, height_m=float(data.qpos[2]),
                      speed_m_s=float(np.linalg.norm(data.qvel[0:2])),
+                     vx_body_m_s=float((quat_to_mat(data.qpos[3:7]).T @ data.qvel[0:3])[0]), wz_rad_s=float(data.qvel[5]),
+                     cmd_vx=float(cmd_now[0]), cmd_wz=float(cmd_now[1]),
                      clear_L_m=float(data.xpos[wheel_bodies[0]][2] - WHEEL_R), clear_R_m=float(data.xpos[wheel_bodies[1]][2] - WHEEL_R)))
     R = quat_to_mat(data.qpos[3:7])
     up = -model.opt.gravity / np.linalg.norm(model.opt.gravity)
@@ -353,6 +365,10 @@ summary = {
     "end_displacement_m": rows[-1]["displacement_m"], "end_speed_m_s": rows[-1]["speed_m_s"],
     "wheel_saturation_frac": float(np.mean(sat)),
     "max_tilt_deg": max_tilt,
+    "tracking": [dict(t0=t0, vx=vx, wz=wz, **(lambda seg: dict(mean_vx=float(np.mean([r["vx_body_m_s"] for r in seg])) if seg else None,
+                                                                mean_wz=float(np.mean([r["wz_rad_s"] for r in seg])) if seg else None))(
+                     [r for r in rows if t0 + 1.5 <= r["time_s"] < (CMDS[i + 1][0] if i + 1 < len(CMDS) else 1e9)]))
+                 for i, (t0, vx, wz) in enumerate(CMDS)],
     "press_clearance_m": {f"{b}@{t0:g}": [round(max(r[c] for r in rows if t0 <= r["time_s"] < t0 + 1.0), 4) if any(t0 <= r["time_s"] < t0 + 1.0 for r in rows) else None
                                          for c in ("clear_L_m", "clear_R_m")] for b, t0 in PRESSES},
 }

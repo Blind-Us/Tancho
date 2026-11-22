@@ -30,6 +30,8 @@ parser.add_argument("--task", default="TanchoV3-Walk-Flat-Play-v0")
 parser.add_argument("--checkpoint", type=Path, required=True, help="exported TorchScript policy.pt")
 parser.add_argument("--settle", type=float, default=1.5, help="seconds excluded at the start of each segment")
 parser.add_argument("--output-dir", type=Path, default=None)
+parser.add_argument("--latency-substeps", type=int, default=0, help="hold the previous motor targets for this many 5 ms substeps after each policy step")
+parser.add_argument("--obs-noise", action="store_true", help="keep the training sensor noise on the actor observation")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 simulation_app = AppLauncher(args).app
@@ -77,6 +79,11 @@ def angle_delta_rad(value: float, reference: float) -> float:
 def main() -> int:
     total = sum(seg[1] for seg in SCHEDULE)
     cfg = parse_env_cfg(args.task, device=args.device, num_envs=1, use_fabric=True)
+    if args.latency_substeps:
+        for term in (cfg.actions.leg_pos, cfg.actions.wheel_vel):
+            term.min_delay_substeps = term.max_delay_substeps = args.latency_substeps
+    if args.obs_noise:
+        cfg.observations.policy.enable_corruption = True
     cfg.episode_length_s = total + 1.0
     # Hold the command: no resampling, no randomly "standing" env.
     cfg.commands.base_velocity.resampling_time_range = (1.0e6, 1.0e6)
