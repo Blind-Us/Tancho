@@ -245,3 +245,13 @@ class TanchoV3StationFinalCalmEnvCfg(TanchoV3StationFinalEnvCfg):
         super().__post_init__()
         self.rewards.ang_vel_xy.weight *= 5.0
         self.rewards.upright.weight *= 2.0
+
+
+# Final tracks ~70-80% of the commanded speed (1.2 m/s -> 0.84).  Tighter / heavier velocity
+# tracking (std 0.5 -> 0.3, weights 2 / 1 -> 3 / 1.5); from the final checkpoint.
+@configclass
+class TanchoV3StationFinalTrackEnvCfg(TanchoV3StationFinalEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.rewards.lin_vel_xy.weight, self.rewards.lin_vel_xy.params["std"] = 3.0, 0.3
+        self.rewards.ang_vel_z.weight, self.rewards.ang_vel_z.params["std"] = 1.5, 0.3
