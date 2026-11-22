@@ -45,6 +45,7 @@ parser.add_argument("--step-height", type=float, default=None, help="step_up / s
 parser.add_argument("--max-tilt-deg", type=float, default=None, help="reset only beyond this body tilt (default: the task's 15 deg / 35 deg while a trigger is pressed)")
 parser.add_argument("--guidance", type=float, default=1.0, help="Climb tasks: reference-lift injection scale")
 parser.add_argument("--camera-height", type=float, default=0.9, help="Fixed world-space camera height in m")
+parser.add_argument("--fast", action="store_true", help="speed levels up to 1.2 m/s / 1.5 rad/s (StationWalkHopFast)")
 parser.add_argument("--camera-distance", type=float, default=1.4, help="Horizontal follow distance in m")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
@@ -60,6 +61,8 @@ import tancho_v3_lab.tasks  # noqa: E402,F401
 
 # (vx m/s, yaw rate rad/s) per speed level
 SPEED_LEVELS = {"KEY_1": (0.2, 0.5), "KEY_2": (0.4, 0.8), "KEY_3": (0.6, 1.0)}
+if args.fast:
+    SPEED_LEVELS = {"KEY_1": (0.4, 0.6), "KEY_2": (0.8, 1.0), "KEY_3": (1.2, 1.5)}
 MOVE_KEYS = {"W": (1, 0), "S": (-1, 0), "A": (0, 1), "D": (0, -1)}
 # Not SPACE: in the Isaac Sim window it toggles timeline play / pause.
 TRIGGER_KEYS = {

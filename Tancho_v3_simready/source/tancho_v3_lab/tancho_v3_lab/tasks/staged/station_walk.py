@@ -185,3 +185,24 @@ class TanchoV3StationWalkHopPushEnvCfg(TanchoV3StationWalkHopEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.events.push_robot.interval_range_s = (2.0, 4.0)
+
+
+# -- faster driving (user 2026-11-22 21:57: "every gear feels like gear 1") ------------
+# Up to 1.2 m/s (rated wheel speed 52 rad/s = 1.9 m/s) and 1.5 rad/s; the range grows from
+# the 0.6 m/s / 1 rad/s the walk + hop policy knows over 400 iterations.
+@configclass
+class TanchoV3StationWalkHopFastEnvCfg(TanchoV3StationWalkHopEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.curriculum = StationWalkCurriculumCfg()
+        self.curriculum.command_range.params = {"start": 0.5, "ramp_iters": 400, "vx_max": 1.2, "wz_max": 1.5}
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.6, 0.6)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.75, 0.75)
+
+
+@configclass
+class TanchoV3StationWalkHopFastPlayEnvCfg(TanchoV3StationWalkHopPlayEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.2, 1.2)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.5, 1.5)

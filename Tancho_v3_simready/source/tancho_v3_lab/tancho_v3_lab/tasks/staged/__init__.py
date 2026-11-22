@@ -363,3 +363,14 @@ for _suffix, _cfg in (("-v0", "TanchoV3StationWalkHopPushEnvCfg"), ("-Play-v0", 
             "rsl_rl_cfg_entry_point": f"{__name__}.station_skills:TanchoV3StationSkillsPPORunnerCfg",
         },
     )
+
+for _suffix, _cfg in (("-v0", "TanchoV3StationWalkHopFastEnvCfg"), ("-Play-v0", "TanchoV3StationWalkHopFastPlayEnvCfg")):
+    gym.register(
+        id="TanchoV3-StationWalkHopFast" + _suffix,
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.station_walk:{_cfg}",
+            "rsl_rl_cfg_entry_point": f"{__name__}.station_skills:TanchoV3StationSkillsPPORunnerCfg",
+        },
+    )
