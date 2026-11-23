@@ -2,7 +2,7 @@
 
 一個 policy 包含：WASD（最高 1.2 m/s、1.5 rad/s）、原地定點、LT／RT 收腳、LT+RT 小跳、深蹲（底盤離地 10.7 cm）。輪 Kd 1。部署規格見 `DEPLOY.md`；論文的 LQR／RL／實機比較表見 `THESIS_TABLE.md`；論文用圖與 4.6 改寫稿在 `thesis/`。
 
-這一版是 StationFinal 第 1200 iter 再接續訓練的結果（加強速度追蹤，同時把「停下保持」的權重加倍，第 200 iter）。舊的 r28_1200 放在 `../tancho_v3_station_candidates/final_r28_1200/`。
+這一版是 StationFinal 第 1200 iter 再接續訓練的結果（加強速度追蹤，同時把「停下保持」的權重加倍，第 200 iter）。舊的 r28_1200 放在 `../_archive/tancho_v3_station_candidates/final_r28_1200/`。
 
 ## 主要結果（括號內是舊的 r28_1200）
 
