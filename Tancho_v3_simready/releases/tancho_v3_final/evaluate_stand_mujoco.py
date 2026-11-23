@@ -28,7 +28,9 @@ import numpy as np
 import torch
 
 ROOT = Path(__file__).resolve().parents[2]
-URDF = ROOT / "releases/tancho_v3_hop_r3_mujoco/robot/Tancho_v3.urdf"
+URDF = next((u for u in (Path(__file__).resolve().parent / "robot/Tancho_v3.urdf",
+                          ROOT / "releases/_archive/tancho_v3_hop_r3_mujoco/robot/Tancho_v3.urdf") if u.exists()),
+            ROOT / "releases/_archive/tancho_v3_hop_r3_mujoco/robot/Tancho_v3.urdf")
 ACT_JOINTS = ["joint_thigh_L", "joint_calf_L", "joint_thigh_R", "joint_calf_R", "joint_wheel_L", "joint_wheel_R"]
 LEGS, WHEELS = ACT_JOINTS[:4], ACT_JOINTS[4:]
 DEFAULT = {"joint_thigh_L": -0.5, "joint_calf_L": 0.87, "joint_thigh_R": -0.5, "joint_calf_R": 0.87}
@@ -213,7 +215,8 @@ def build_obs(last_action):
 
 
 # -- operator presses: LT / RT lift reference (Pi table) and the HopCharge crouch -------
-LIFT = np.loadtxt(ROOT / "releases/tancho_v3_hop_r3_mujoco/reference_lift_table.csv", delimiter=",", skiprows=1)[:, 2:4]
+LIFT = np.loadtxt(next(c for c in (Path(__file__).resolve().parent / "reference_lift_table.csv",
+                              ROOT / "releases/_archive/tancho_v3_hop_r3_mujoco/reference_lift_table.csv") if c.exists()), delimiter=",", skiprows=1)[:, 2:4]
 CROUCH, CROUCH_S, EXTEND, CHARGE_STEP_S = np.array([float(x) for x in args.crouch.split(",")]), args.crouch_s, np.array([0.245, -0.60]), 0.01
 CHARGE_KEYS = ((CHARGE_STEP_S, 0.245, -0.60), (0.07, 0.245, -0.60), (0.08, -0.305, 0.75), (0.16, -0.305, 0.75), (0.28, 0.0, 0.0))
 trig, phase = np.zeros(2), np.full(2, 10.0)

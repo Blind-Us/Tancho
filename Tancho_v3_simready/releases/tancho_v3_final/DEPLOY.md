@@ -28,7 +28,23 @@
 
 ## 每一步
 
-1. **抬腳 / 小跳**：同 hop v2 `DEPLOY.md`（上升緣開始 0.4 s 動作、動作中排隊、LT+RT 兩側同步開始），查 `reference_lift_table.csv`。
+1. **抬腳 / 小跳**（每 0.02 s 一次；LT/RT 類比 trigger > 0.5 算按下；開機時 phase_L = phase_R = 10 s）：
+
+   ```
+   edge[s]  = 這一步按下 且 上一步沒按下         # s = L, R
+   phase[s] += 0.02
+   busy[s]  = phase[s] < 0.399
+   queued[s] |= edge[s] and busy[s]               # 動作中的新按鍵先排隊（最多一個）
+   start[s] = (edge[s] or queued[s]) and not busy[s]
+   # 小跳同步：兩側都想開始、但有一側還在動作中 → 兩側一起等
+   if (edge[L] or queued[L]) and (edge[R] or queued[R]) and (busy[L] or busy[R]):
+       queued[L] |= edge[L]; queued[R] |= edge[R]
+       start[L] = start[R] = False
+   queued[s] &= not start[s]
+   if start[s]: phase[s] = 0
+   ```
+
+   抬腳偏移 (dthigh, dcalf) 查 `reference_lift_table.csv`（第 k 列 = phase k × 0.02 s；phase ≥ 0.4 s 時為 0）。
 2. **蹲下**：放開後 0.3 s 內再按不理會（冷卻）。按住時每步 level += 0.02 / 0.45（上限 1），偏移 = level · (−0.45, +1.10)；放開後偏移 = release_level · (−0.45, +1.10) · max(0, 1 − t / 0.28)。
 3. 組成 obs → policy → clip 到 [−1, 1]。
 4. 腿目標 = 標稱 + 0.6·a[0:4] + 抬腳偏移 + 蹲下偏移；輪目標速 = 52.36·a[4:6] rad/s。
@@ -36,3 +52,9 @@
 ## 上實機的順序
 
 先架高，確認各腳、輪子的方向，以及輪里程的正負號 → 原地站 60 s → 輕推 → LT / RT → 蹲下 → 小跳 → 一檔 WASD → 再加速。**不要在抬腳或跳的時候推它；斜坡會溜。**
+
+## 自我檢查
+
+- `reference_io.json`：8 組 obs 與對應 actions，`policy.pt` / `policy.onnx` 跑出來誤差要 < 1e-4（2026-11-23 實測：torch 0、onnx 2e-7）。
+- `obs[11:17]` 存的是 clip 後的 a，**不含**抬腳 / 蹲下偏移。
+- MuJoCo 模擬（需要 `mujoco`、`torch`）：`python evaluate_stand_mujoco.py --checkpoint policy.pt --output-dir out --wheel-kd 1 --duration 20 --crouch=-0.45,1.10 --crouch-s 0.45 --charge-cooldown 0.3 --charge-jump 0 --presses LT:3,RT:6,LT+RT:9,CHG:12`，機器人模型在 `robot/`。
