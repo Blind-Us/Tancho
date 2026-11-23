@@ -4,7 +4,7 @@
 
 | 項目 | 值 |
 |---|---|
-| 訓練 | `TanchoV3-StationFinal-v0`，run `logs/rsl_rl/tancho_v3_station_skills/2026-11-23_03-25-48_85dfd84`，第 1200 iter（`train/model_1200.pt`） |
+| 訓練 | `TanchoV3-StationFinalTrackHold-v0`，run `logs/rsl_rl/tancho_v3_station_skills/2026-11-23_07-51-13_dae8548`，第 200 iter（`train/model_200.pt`）；由 StationFinal 第 1200 iter 接續 |
 | 檔案 | `policy.pt`（TorchScript）、`policy.onnx`（輸入 [1, 34]、輸出 [1, 6]，觀測正規化已包含在內），SHA256 在 `SHA256SUMS` |
 | 頻率 | policy 50 Hz；馬達迴路照常 |
 | **輪馬達** | DM-H3510 速度模式，**Kd = 1.0**，扭力上限 ±0.45 N·m |

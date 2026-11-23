@@ -1,7 +1,7 @@
-seed: 66
+seed: 69
 device: cuda:0
 num_steps_per_env: 24
-max_iterations: 1500
+max_iterations: 500
 empirical_normalization: {}
 obs_groups:
   actor:
@@ -12,7 +12,7 @@ clip_actions: 1.0
 check_for_nan: true
 save_interval: 50
 experiment_name: tancho_v3_station_skills
-run_name: 85dfd84
+run_name: dae8548
 logger: tensorboard
 neptune_project: isaaclab
 wandb_project: isaaclab
