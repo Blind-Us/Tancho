@@ -11,9 +11,8 @@ Tancho 是一個 6 自由度（6-DOF）雙輪腿機器人專案。本專案包�
 
 **最終可部署版本只有一個：[`Tancho_v3_simready/releases/tancho_v3_final/`](./Tancho_v3_simready/releases/tancho_v3_final/)**（站立定點、WASD、收左/右腳、蹲下、小跳）。
 
-- 部署：`DEPLOY.md`；成績表：`THESIS_TABLE.md`；論文 4.6 稿：`thesis/`
-- 論文測試輸出：`outputs/thesis_final_20261123/`
-- 其他舊版本與舊輸出都已移到 `_archive/`（`releases/_archive/`、`outputs/_archive/`、`Tancho_v3_simready/docs/archive/`），只供查閱，不要拿來部署。
+- 部署：`DEPLOY.md`；成績表：`THESIS_TABLE.md`；論文 4.6 稿：`Tancho_v3_simready/docs/thesis/`
+- 舊版本都已從資料夾移除；要找舊版請看 git 歷史（例如 commit 7aad231 還保留所有舊 release）。
 
 ---
 

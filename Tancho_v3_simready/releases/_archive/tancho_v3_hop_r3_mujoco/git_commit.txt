@@ -1,9 +1,0 @@
-commit c6ca4e70aca5be5f691760072152ffb3600fd97a
-dirty_task_files yes
-M Tancho_v3_simready/scripts/wheel_only/evaluate_deep_squat.py
- M Tancho_v3_simready/scripts/wheel_only/evaluate_stand.py
- M Tancho_v3_simready/scripts/wheel_only/evaluate_walk.py
- M Tancho_v3_simready/source/tancho_v3_lab/tancho_v3_lab/tasks/staged/env_cfg.py
-?? Tancho_v3_simready/source/tancho_v3_lab/tancho_v3_lab/tasks/staged/commands.py
-init_checkpoint /home/azul/Tancho/Tancho_v3_simready/logs/rsl_rl/tancho_v3_hop_push/2026-11-01_21-20-43_7fbd33e-dirty/model_final.pt
-keep_obs_norm True
