@@ -64,6 +64,7 @@ parser.add_argument("--noise-scale", type=float, default=1.0, help="multiplies t
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--slope-deg", type=float, default=0.0, help="emulate an incline by tilting gravity about y (+x downhill)")
 parser.add_argument("--cmd", default="", help="velocity command schedule 't0:vx:wz,...' (held until the next entry); the odometry hold point follows the robot while non-zero")
+parser.add_argument("--policy-hold", type=int, default=1, help="run the policy every N control steps and hold its action (50/N Hz)")
 parser.add_argument("--dt", type=float, default=0.001, help="MuJoCo physics step (Isaac: 0.005)")
 parser.add_argument("--wheel-kd", type=float, default=4.0, help="wheel velocity-loop Kd (StationV4: 1.0)")
 parser.add_argument("--noslip", type=int, default=10, help="MuJoCo noslip_iterations (0 = MuJoCo default)")
@@ -313,7 +314,10 @@ for k in range(steps):
         o = build_obs(last)
         if args.obs_noise:
             o = o + rng.uniform(-NOISE, NOISE).astype(np.float32)
-        a = policy(torch.from_numpy(o).unsqueeze(0))[0].numpy()
+        if k % args.policy_hold == 0:
+            a = policy(torch.from_numpy(o).unsqueeze(0))[0].numpy()
+        else:
+            a = last.copy()  # report 4.5: the policy runs every N steps, zero-order hold in between
     a = np.clip(a, -1.0, 1.0)
     last = a.astype(np.float32)
     off = np.concatenate([lift_offset(phase[0]), lift_offset(phase[1])])
