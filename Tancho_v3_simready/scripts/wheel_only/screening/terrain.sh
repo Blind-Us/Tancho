@@ -10,7 +10,7 @@ for v in "rough05 --terrain rough --difficulty 0.5" "rough10 --terrain rough --d
   timeout -s KILL 1200 conda run -n env_isaaclab python $E --headless --task $T --checkpoint $P --duration 60 --push-vel 0 --output-dir $O/is_$n "$@" > $O/is_$n.log 2>&1
 done
 timeout -s KILL 1200 conda run -n env_isaaclab python $E --headless --task $T --checkpoint $P --duration 20 --push-vel 0.5 --terrain rough --difficulty 1.0 --output-dir $O/is_rough10_push > $O/is_rough10_push.log 2>&1
-M="nice conda run -n env_isaaclab python -I scripts/wheel_only/evaluate_stand_mujoco.py --checkpoint $P --charge-jump 0 --wheel-kd 1.0 --duration 60"
+M="nice conda run -n env_isaaclab python -I scripts/wheel_only/evaluate_stand_mujoco.py --checkpoint $P --charge-jump 0 --wheel-kd 1.0 --duration 60 ${MJX:-}"
 for s in 5 -5 8 -8; do $M --slope-deg $s --output-dir $O/mj_slope$s > /dev/null 2>&1; done
 python3 - "$O" <<'P'
 import json, sys, glob, os
